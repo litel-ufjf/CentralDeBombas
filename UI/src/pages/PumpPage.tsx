@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
+import { CalibrateRunPanel } from "../components/CalibrateRunPanel";
 import { CalibrationPanel } from "../components/CalibrationPanel";
 import { ConnectBar } from "../components/ConnectBar";
 import { ExperimentModal } from "../components/ExperimentModal";
@@ -197,6 +198,10 @@ export function PumpPage() {
         </button>
 
         <div className="mt-8">
+          <CalibrateRunPanel key={pump.id} pumpId={pump.id} />
+        </div>
+
+        <div className="mt-6">
           <CalibrationPanel
             set={pump.calibrationSet}
             onChange={(scope, calibration) =>

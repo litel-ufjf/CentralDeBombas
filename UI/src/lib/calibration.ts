@@ -163,6 +163,68 @@ export function withCalibrationAtScope(
   return { ...set, both: next };
 }
 
+export type CalibRunMethod = "fixedVolume" | "fixedTime";
+
+export type CalibRunRecipe = {
+  pwm: number;
+  settleS: number;
+  direction: PumpDirection;
+  method: CalibRunMethod;
+  volumeMl: number;
+  measureS: number;
+};
+
+export const DEFAULT_CALIB_RECIPE: CalibRunRecipe = {
+  pwm: 90,
+  settleS: 15,
+  direction: "forward",
+  method: "fixedVolume",
+  volumeMl: 100,
+  measureS: 60,
+};
+
+export function sanitizeCalibRecipe(
+  value: Partial<CalibRunRecipe> | null | undefined,
+): CalibRunRecipe {
+  const pwm = clampPwm(Number(value?.pwm));
+  const settleS = Number(value?.settleS);
+  const measureS = Number(value?.measureS);
+  const volumeMl = Number(value?.volumeMl);
+  return {
+    pwm: pwm > 0 ? pwm : DEFAULT_CALIB_RECIPE.pwm,
+    settleS:
+      Number.isFinite(settleS) && settleS >= 0
+        ? Math.min(600, settleS)
+        : DEFAULT_CALIB_RECIPE.settleS,
+    direction: value?.direction === "reverse" ? "reverse" : "forward",
+    method: value?.method === "fixedTime" ? "fixedTime" : "fixedVolume",
+    volumeMl:
+      Number.isFinite(volumeMl) && volumeMl > 0
+        ? volumeMl
+        : DEFAULT_CALIB_RECIPE.volumeMl,
+    measureS:
+      Number.isFinite(measureS) && measureS > 0
+        ? Math.min(3600, measureS)
+        : DEFAULT_CALIB_RECIPE.measureS,
+  };
+}
+
+export function flowFromVolumeTime(volumeMl: number, seconds: number) {
+  if (!Number.isFinite(volumeMl) || !Number.isFinite(seconds) || volumeMl <= 0 || seconds <= 0) {
+    return 0;
+  }
+  return volumeMl / (seconds / 60);
+}
+
+export function slopeFromSteadyRun(pwm: number, flowMlMin: number, pwm0: number) {
+  const duty = clampPwm(pwm);
+  const threshold = clampPwm0(pwm0);
+  if (duty <= threshold || !Number.isFinite(flowMlMin) || flowMlMin <= 0) {
+    return null;
+  }
+  return flowMlMin / (duty - threshold);
+}
+
 export function flowFromPwm(pwm: number, calibration: Calibration) {
   const { a, pwm0 } = sanitizeCalibration(calibration);
   const duty = clampPwm(pwm);
