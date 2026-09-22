@@ -9,3 +9,6 @@ documentos/*.log
 documentos/*.out
 documentos/*.toc
 documentos/*.synctex.gz
+UI/build/installer.nsh
+UI/package.json
+UI/package.json
