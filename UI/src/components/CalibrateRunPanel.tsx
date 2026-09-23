@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  calibrationFor,
+  clampPwm0,
   flowFromVolumeTime,
   sanitizeCalibRecipe,
   slopeFromSteadyRun,
@@ -8,6 +8,7 @@ import {
   type CalibRunRecipe,
   type PumpDirection,
 } from "../lib/calibration";
+import { resolveCalibration } from "../lib/preferences";
 import { loadCalibRecipe, saveCalibRecipe } from "../lib/storage";
 import { useBench } from "../context/BenchContext";
 
@@ -29,9 +30,15 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
     setEnabled,
     setCalibration,
     saveCalibrationHistory,
+    preferences,
   } = useBench();
   const pump = pumps.find((item) => item.id === pumpId);
   const [recipe, setRecipe] = useState<CalibRunRecipe>(() => loadCalibRecipe(pumpId));
+  const adopted = pump
+    ? resolveCalibration(pump.calibrationSet, recipe.direction, preferences, pumpId)
+    : null;
+  const adoptedPwm0 = adopted?.calibration.pwm0 ?? 70;
+  const [pwm0, setPwm0] = useState(adoptedPwm0);
   const [phase, setPhase] = useState<Phase>("setup");
   const [elapsed, setElapsed] = useState(0);
   const [measureS, setMeasureS] = useState(0);
@@ -44,6 +51,10 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
   useEffect(() => {
     saveCalibRecipe(pumpId, recipe);
   }, [pumpId, recipe]);
+
+  useEffect(() => {
+    setPwm0(adoptedPwm0);
+  }, [adoptedPwm0, pumpId, recipe.direction]);
 
   useEffect(() => {
     return () => {
@@ -96,10 +107,10 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
       setError("Informe o tempo de medição em regime.");
       return;
     }
-    const pwm0 = pump ? calibrationFor(pump.calibrationSet, recipe.direction).pwm0 : 70;
-    if (recipe.pwm <= pwm0) {
+    const threshold = clampPwm0(pwm0);
+    if (recipe.pwm <= threshold) {
       setError(
-        `O PWM de regime (${recipe.pwm}%) precisa ficar acima do PWM₀ (${pwm0}%).`,
+        `O PWM de regime (${recipe.pwm}%) precisa ficar acima do PWM₀ (${threshold}%).`,
       );
       return;
     }
@@ -162,8 +173,8 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
       ? recipe.volumeMl
       : Number(volumeInput);
   const flow = flowFromVolumeTime(volumeMl, measuredSeconds);
-  const pwm0 = pump ? calibrationFor(pump.calibrationSet, recipe.direction).pwm0 : 70;
-  const slope = slopeFromSteadyRun(recipe.pwm, flow, pwm0);
+  const threshold = clampPwm0(pwm0);
+  const slope = slopeFromSteadyRun(recipe.pwm, flow, threshold);
 
   const applyResult = () => {
     if (!pump || !slope) {
@@ -171,8 +182,9 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
       return;
     }
     const calibration = {
-      ...calibrationFor(pump.calibrationSet, recipe.direction),
+      ...(adopted?.calibration ?? { a: 3, pwm0: threshold }),
       a: Number(slope.toFixed(4)),
+      pwm0: threshold,
     };
     setCalibration(pumpId, recipe.direction, calibration);
     const label =
@@ -192,10 +204,11 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
       </p>
       <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
         A bomba sobe no PWM de regime, espera o transitório (mangueira com
-        líquido, sem ar) e só então mede a vazão.
+        líquido, sem ar) e só então mede a vazão. O coeficiente usa
+        a = Q / (PWM − PWM₀).
       </p>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label className="text-[11px] text-muted-foreground">
           PWM de regime (%)
           <input
@@ -207,6 +220,19 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
             disabled={busy}
             value={recipe.pwm}
             onChange={(event) => update({ pwm: Number(event.target.value) })}
+          />
+        </label>
+        <label className="text-[11px] text-muted-foreground">
+          PWM₀ (%)
+          <input
+            className="field-light mt-1"
+            type="number"
+            min={0}
+            max={99.9}
+            step="0.1"
+            disabled={busy}
+            value={threshold}
+            onChange={(event) => setPwm0(clampPwm0(Number(event.target.value)))}
           />
         </label>
         <label className="text-[11px] text-muted-foreground">
@@ -412,7 +438,7 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
           <p className="mt-2 font-mono text-[13px] leading-relaxed">
             Q ≈ {flow.toFixed(2)} mL/min
             <br />
-            PWM = {recipe.pwm}% · PWM₀ = {pwm0}%
+            PWM = {recipe.pwm}% · PWM₀ = {threshold}%
             <br />
             a ≈ {slope !== null ? slope.toFixed(4) : "—"} (mL/min)/%
           </p>

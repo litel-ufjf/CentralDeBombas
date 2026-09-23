@@ -10,3 +10,5 @@ documentos/*.out
 documentos/*.toc
 documentos/*.synctex.gz
 UI/build/installer.nsh
+.ipynb_checkpoints/
+**/__pycache__/

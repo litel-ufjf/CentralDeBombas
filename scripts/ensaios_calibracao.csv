@@ -1,0 +1,13 @@
+bomba,sentido,data_hora,modo,volume_ml,pwm_regime,pwm0,tempo_s,fluido,frasco_observado,frasco_capacidade_ml,graduacao_min_ml,graduacao_max_ml,pwm0_igual_nos_sentidos,fonte,observacao
+1,direto,2026-09-23T16:44:37-03:00,volume_fixo,150,90,27,97.2,agua,B,200,50,200,sim,app_dev,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+1,reverso,2026-09-23T16:47:16-03:00,volume_fixo,150,90,27,99.5,agua,B,200,50,200,sim,app_dev,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+2,direto,2026-09-23T16:31:46-03:00,volume_fixo,150,90,40,105.7,agua,B,200,50,200,sim,app_dev,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+2,reverso,2026-09-23T16:34:03-03:00,volume_fixo,150,90,40,99.8,agua,B,200,50,200,sim,app_dev,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+3,direto,2026-09-23T16:07:37-03:00,volume_fixo,150,90,33,106.2,agua,B,200,50,200,sim,app_dev,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+3,reverso,2026-09-23T16:04:16-03:00,volume_fixo,150,90,33,113.0,agua,B,200,50,200,sim,app_dev,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+4,direto,2026-09-22T18:05:00-03:00,volume_fixo,150,90,33,100.5,agua,B,200,50,200,sim,app_instalado,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+4,reverso,2026-09-22T18:08:00-03:00,volume_fixo,150,90,33,104.3,agua,B,200,50,200,sim,app_instalado,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+5,direto,2026-09-22T17:40:00-03:00,volume_fixo,150,90,35,111.3,agua,B,200,50,200,sim,app_instalado,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+5,reverso,2026-09-22T17:45:00-03:00,volume_fixo,150,90,35,107.3,agua,B,200,50,200,sim,app_instalado,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+6,direto,2026-09-22T17:27:00-03:00,volume_fixo,150,90,29,89.0,agua,B,200,50,200,sim,app_instalado,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
+6,reverso,2026-09-22T17:31:00-03:00,volume_fixo,150,90,29,98.6,agua,B,200,50,200,sim,app_instalado,Leitura visual da escala de B; PWM0 aproximado pelo minimo que o motor gira.
