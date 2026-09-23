@@ -9,6 +9,7 @@ import { BenchProvider } from "./context/BenchContext";
 import { IndexPage } from "./pages/IndexPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { PumpPage } from "./pages/PumpPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 const rootRoute = createRootRoute({
   component: function RootLayout() {
@@ -33,7 +34,13 @@ const pumpRoute = createRoute({
   component: PumpPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, pumpRoute]);
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/configuracoes",
+  component: SettingsPage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, pumpRoute, settingsRoute]);
 
 const history = createHashHistory();
 

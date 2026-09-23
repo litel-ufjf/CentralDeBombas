@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   MOTOR_COUNT,
-  calibrationFor,
   clampPwm,
   createChartConfig,
   createDefaultSetpoints,
@@ -33,9 +32,19 @@ import { SerialClient, listSerialPorts, serialSupported, type ComPort } from "..
 import {
   loadCalibrations,
   loadChartLayouts,
+  loadPreferences,
   saveCalibrations,
   saveChartLayouts,
+  savePreferences,
 } from "../lib/storage";
+import {
+  resolveCalibration,
+  sanitizePreferences,
+  withManualPick,
+  type DisplayPreferences,
+  type Preferences,
+  type ResolvedCalibration,
+} from "../lib/preferences";
 import type { TelemetrySample } from "../components/FlowChart";
 
 export type DisplayPump = {
@@ -47,6 +56,7 @@ export type DisplayPump = {
   speed: number;
   calibration: Calibration;
   calibrationSet: PumpCalibrationSet;
+  calibrationChoice: ResolvedCalibration;
 };
 
 type PumpTelemetry = {
@@ -88,6 +98,14 @@ type BenchContextValue = {
   ) => void;
   saveCalibrationHistory: (id: number, scope: CalibrationScope, name: string) => void;
   applyCalibrationHistory: (id: number, record: CalibrationRecord) => void;
+  preferences: Preferences;
+  setCalibrationPolicy: (policy: Preferences["calibrationPolicy"]) => void;
+  setManualCalibration: (
+    id: number,
+    scope: CalibrationScope,
+    recordId: string,
+  ) => void;
+  setDisplayPreference: (key: keyof DisplayPreferences, value: boolean) => void;
   setFlow: (id: number, flow: number) => void;
   setGlobalPwm: (pwm: number) => void;
   applyGlobalPwm: (pwm: number) => void;
@@ -108,13 +126,20 @@ function toDisplay(
   connected: boolean,
   setpoints: PumpSetpoint[],
   calibrations: PumpCalibrationSet[],
+  preferences: Preferences,
 ): DisplayPump[] {
   return setpoints.map((setpoint, index) => {
     const id = index + 1;
     const pwm = connected ? setpoint.pwm : 0;
     const running = connected && setpoint.enabled;
     const set = calibrations[index];
-    const calibration = calibrationFor(set, setpoint.direction);
+    const calibrationChoice = resolveCalibration(
+      set,
+      setpoint.direction,
+      preferences,
+      id,
+    );
+    const calibration = calibrationChoice.calibration;
     return {
       id,
       name: pumpName(id),
@@ -124,6 +149,7 @@ function toDisplay(
       speed: running ? Math.max(0, flowFromPwm(pwm, calibration)) : 0,
       calibration,
       calibrationSet: set,
+      calibrationChoice,
     };
   });
 }
@@ -136,6 +162,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [setpoints, setSetpoints] = useState(createDefaultSetpoints);
   const [calibrations, setCalibrations] = useState(loadCalibrations);
+  const [preferences, setPreferencesState] = useState(loadPreferences);
   const [charts, setCharts] = useState(loadChartLayouts);
   const [telemetry, setTelemetry] = useState(() =>
     loadChartLayouts().map((list) => ({
@@ -152,12 +179,14 @@ export function BenchProvider({ children }: { children: ReactNode }) {
     connected: false,
     setpoints: createDefaultSetpoints(),
     calibrations: loadCalibrations(),
+    preferences: loadPreferences(),
     telemetry: emptyTelemetry(),
   });
   sampleRef.current = {
     connected,
     setpoints,
     calibrations,
+    preferences,
     telemetry,
   };
   const clientRef = useRef<SerialClient | null>(null);
@@ -356,10 +385,12 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         return;
       }
       const enabled = !current.enabled;
-      const pwm0 = calibrationFor(
+      const pwm0 = resolveCalibration(
         calibrations[id - 1],
         current.direction,
-      ).pwm0;
+        preferences,
+        id,
+      ).calibration.pwm0;
       const pwm = enabled && current.pwm === 0 ? pwm0 : current.pwm;
       setSetpoints((pumps) =>
         pumps.map((pump, index) =>
@@ -371,7 +402,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       }
       void send(commands.enable(id, enabled));
     },
-    [calibrations, send, setpoints],
+    [calibrations, preferences, send, setpoints],
   );
 
   const persistCalibrations = useCallback((next: PumpCalibrationSet[]) => {
@@ -424,8 +455,49 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   const applyCalibrationHistory = useCallback(
     (id: number, record: CalibrationRecord) => {
       setCalibration(id, record.scope, record.calibration);
+      setPreferencesState((current) => {
+        const next = withManualPick(current, id, record.scope, record.id);
+        savePreferences(next);
+        return next;
+      });
     },
     [setCalibration],
+  );
+
+  const persistPreferences = useCallback((next: Preferences) => {
+    const clean = sanitizePreferences(next);
+    savePreferences(clean);
+    return clean;
+  }, []);
+
+  const setCalibrationPolicy = useCallback(
+    (policy: Preferences["calibrationPolicy"]) => {
+      setPreferencesState((current) =>
+        persistPreferences({ ...current, calibrationPolicy: policy }),
+      );
+    },
+    [persistPreferences],
+  );
+
+  const setManualCalibration = useCallback(
+    (id: number, scope: CalibrationScope, recordId: string) => {
+      setPreferencesState((current) =>
+        persistPreferences(withManualPick(current, id, scope, recordId)),
+      );
+    },
+    [persistPreferences],
+  );
+
+  const setDisplayPreference = useCallback(
+    (key: keyof DisplayPreferences, value: boolean) => {
+      setPreferencesState((current) =>
+        persistPreferences({
+          ...current,
+          display: { ...current.display, [key]: value },
+        }),
+      );
+    },
+    [persistPreferences],
   );
 
   const persistCharts = useCallback((next: PumpChartConfig[][]) => {
@@ -499,11 +571,16 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       const setpoint = setpoints[id - 1];
       const pwm = pwmFromFlow(
         flow,
-        calibrationFor(calibrations[id - 1], setpoint?.direction ?? "forward"),
+        resolveCalibration(
+          calibrations[id - 1],
+          setpoint?.direction ?? "forward",
+          preferences,
+          id,
+        ).calibration,
       );
       setPwm(id, pwm);
     },
-    [calibrations, setPwm, setpoints],
+    [calibrations, preferences, setPwm, setpoints],
   );
 
   const setGlobalPwm = useCallback((pwm: number) => {
@@ -556,10 +633,12 @@ export function BenchProvider({ children }: { children: ReactNode }) {
           changed = true;
           const setpoint = snapshot.setpoints[index];
           const running = snapshot.connected && setpoint.enabled;
-          const calibration = calibrationFor(
+          const calibration = resolveCalibration(
             snapshot.calibrations[index],
             setpoint.direction,
-          );
+            snapshot.preferences,
+            index + 1,
+          ).calibration;
           const flow = running
             ? Math.max(0, flowFromPwm(setpoint.pwm, calibration))
             : 0;
@@ -587,8 +666,8 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const pumps = useMemo(
-    () => toDisplay(connected, setpoints, calibrations),
-    [calibrations, connected, setpoints],
+    () => toDisplay(connected, setpoints, calibrations, preferences),
+    [calibrations, connected, preferences, setpoints],
   );
 
   const value = useMemo<BenchContextValue>(
@@ -611,6 +690,10 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       setCalibration,
       saveCalibrationHistory,
       applyCalibrationHistory,
+      preferences,
+      setCalibrationPolicy,
+      setManualCalibration,
+      setDisplayPreference,
       setFlow,
       setGlobalPwm,
       applyGlobalPwm,
@@ -628,6 +711,10 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       addChart,
       applyCalibrationHistory,
       applyGlobalPwm,
+      preferences,
+      setCalibrationPolicy,
+      setDisplayPreference,
+      setManualCalibration,
       chartsFor,
       connectTo,
       connected,

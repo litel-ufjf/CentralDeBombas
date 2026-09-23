@@ -11,6 +11,7 @@ import {
   maxFlowFromCalibration,
   type PumpDirection,
 } from "../lib/calibration";
+import { resolveCalibration, sourceLabel } from "../lib/preferences";
 
 export function PumpPage() {
   const { id } = useParams({ from: "/bomba/$id" });
@@ -32,6 +33,7 @@ export function PumpPage() {
     updateChart,
     removeChart,
     resetTelemetry,
+    preferences,
   } = useBench();
   const [experimentOpen, setExperimentOpen] = useState(false);
   const pump = pumps.find((item) => item.id === Number(id));
@@ -106,6 +108,7 @@ export function PumpPage() {
           </span>
         </div>
 
+        {preferences.display.estimatedFlow ? (
         <div className="mt-6">
           <div className="mb-1 flex items-end justify-between">
             <span className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
@@ -127,7 +130,14 @@ export function PumpPage() {
             onChange={(event) => setFlow(pump.id, Number(event.target.value))}
             className="slider-run"
           />
+          <p className="mt-2 text-[11px] text-faint">
+            {sourceLabel(pump.calibrationChoice.source)}
+            {pump.calibrationChoice.record
+              ? ` · ${pump.calibrationChoice.record.name || "ensaio"}`
+              : ""}
+          </p>
         </div>
+        ) : null}
 
         <div className="mt-4">
           <div className="mb-1 flex items-end justify-between">
@@ -150,6 +160,14 @@ export function PumpPage() {
             onChange={(event) => setPwm(pump.id, Number(event.target.value))}
             className="slider-run slider-flow"
           />
+          {!preferences.display.estimatedFlow ? (
+            <p className="mt-2 text-[11px] text-faint">
+              {sourceLabel(pump.calibrationChoice.source)}
+              {pump.calibrationChoice.record
+                ? ` · ${pump.calibrationChoice.record.name || "ensaio"}`
+                : ""}
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-6">
@@ -189,45 +207,67 @@ export function PumpPage() {
           {pump.running ? "Desligar bomba" : "Ligar bomba"}
         </button>
 
-        <button
-          type="button"
-          onClick={() => setExperimentOpen(true)}
-          className="mt-3 w-full rounded-[14px] bg-panel-2 py-3.5 text-[13px] leading-none font-semibold text-foreground ring-1 ring-border"
-        >
-          Programar experimento
-        </button>
+        {preferences.display.experiment ? (
+          <button
+            type="button"
+            onClick={() => setExperimentOpen(true)}
+            className="mt-3 w-full rounded-[14px] bg-panel-2 py-3.5 text-[13px] leading-none font-semibold text-foreground ring-1 ring-border"
+          >
+            Programar experimento
+          </button>
+        ) : null}
 
-        <div className="mt-8">
-          <CalibrateRunPanel key={pump.id} pumpId={pump.id} />
-        </div>
+        {preferences.display.calibrateRun ? (
+          <div className="mt-8">
+            <CalibrateRunPanel key={pump.id} pumpId={pump.id} />
+          </div>
+        ) : null}
 
-        <div className="mt-6">
-          <CalibrationPanel
-            set={pump.calibrationSet}
-            onChange={(scope, calibration) =>
-              setCalibration(pump.id, scope, calibration)
-            }
-            onSaveHistory={(scope, name) =>
-              saveCalibrationHistory(pump.id, scope, name)
-            }
-            onApplyHistory={(record) =>
-              applyCalibrationHistory(pump.id, record)
-            }
-          />
-        </div>
+        {preferences.display.calibrationEditor ? (
+          <div className="mt-6">
+            <CalibrationPanel
+              set={pump.calibrationSet}
+              activeRecordIds={[
+                resolveCalibration(
+                  pump.calibrationSet,
+                  "forward",
+                  preferences,
+                  pump.id,
+                ).record?.id,
+                resolveCalibration(
+                  pump.calibrationSet,
+                  "reverse",
+                  preferences,
+                  pump.id,
+                ).record?.id,
+              ]}
+              onChange={(scope, calibration) =>
+                setCalibration(pump.id, scope, calibration)
+              }
+              onSaveHistory={(scope, name) =>
+                saveCalibrationHistory(pump.id, scope, name)
+              }
+              onApplyHistory={(record) =>
+                applyCalibrationHistory(pump.id, record)
+              }
+            />
+          </div>
+        ) : null}
 
-        <div className="mt-6">
-          <PumpMonitor
-            charts={chartsFor(pump.id)}
-            samples={samplesFor(pump.id)}
-            volume={volumeFor(pump.id)}
-            monitoring={monitoringFor(pump.id)}
-            onAdd={() => addChart(pump.id)}
-            onUpdate={(chart) => updateChart(pump.id, chart)}
-            onRemove={(chartId) => removeChart(pump.id, chartId)}
-            onReset={() => resetTelemetry(pump.id)}
-          />
-        </div>
+        {preferences.display.charts ? (
+          <div className="mt-6">
+            <PumpMonitor
+              charts={chartsFor(pump.id)}
+              samples={samplesFor(pump.id)}
+              volume={volumeFor(pump.id)}
+              monitoring={monitoringFor(pump.id)}
+              onAdd={() => addChart(pump.id)}
+              onUpdate={(chart) => updateChart(pump.id, chart)}
+              onRemove={(chartId) => removeChart(pump.id, chartId)}
+              onReset={() => resetTelemetry(pump.id)}
+            />
+          </div>
+        ) : null}
       </section>
       {experimentOpen ? (
         <ExperimentModal

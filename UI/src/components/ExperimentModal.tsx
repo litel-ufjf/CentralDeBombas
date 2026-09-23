@@ -12,17 +12,16 @@ import {
   isContainer,
   isReporter,
   kindCategory,
-  loadProgram,
   moveBlock,
   removeBlock,
   reporterLabel,
-  saveProgram,
   setField,
   type BlockKind,
   type ExperimentBlock,
   type FieldValue,
   type IoRef,
 } from "../lib/experiment";
+import { loadProgram, saveProgram } from "../lib/storage";
 
 type DropTarget = { parentId: string | null; index: number };
 type DragPayload =

@@ -13,11 +13,13 @@ const SCOPES: CalibrationScope[] = ["both", "forward", "reverse"];
 
 export function CalibrationPanel({
   set,
+  activeRecordIds = [],
   onChange,
   onSaveHistory,
   onApplyHistory,
 }: {
   set: PumpCalibrationSet;
+  activeRecordIds?: Array<string | undefined>;
   onChange: (scope: CalibrationScope, calibration: Calibration) => void;
   onSaveHistory: (scope: CalibrationScope, name: string) => void;
   onApplyHistory: (record: CalibrationRecord) => void;
@@ -149,14 +151,23 @@ export function CalibrationPanel({
         </p>
       ) : (
         <ul className="mt-2 max-h-48 space-y-1.5 overflow-auto">
-          {set.history.map((record) => (
+          {set.history.map((record) => {
+            const active = activeRecordIds.includes(record.id);
+            return (
             <li
               key={record.id}
-              className="flex items-center justify-between gap-2 rounded-[10px] bg-panel-2 px-3 py-2 ring-1 ring-border"
+              className={`flex items-center justify-between gap-2 rounded-[10px] bg-panel-2 px-3 py-2 ring-1 ${
+                active ? "ring-run/40" : "ring-border"
+              }`}
             >
               <div className="min-w-0">
                 <p className="truncate text-[12px] font-medium">
                   {record.name || "Sem nome"}
+                  {active ? (
+                    <span className="ml-2 text-[10px] font-medium tracking-wide text-run uppercase">
+                      Em uso
+                    </span>
+                  ) : null}
                 </p>
                 <p className="font-mono text-[10px] text-faint">
                   {new Date(record.savedAt).toLocaleString("pt-BR", {
@@ -178,7 +189,8 @@ export function CalibrationPanel({
                 Usar
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

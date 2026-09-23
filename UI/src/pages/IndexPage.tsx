@@ -14,6 +14,7 @@ export function IndexPage() {
     applyGlobalPwm,
     setGlobalPwm,
     stopAll,
+    preferences,
   } = useBench();
   const activeCount = pumps.filter((pump) => pump.running).length;
 
@@ -65,6 +66,7 @@ export function IndexPage() {
 
       <div className="sticky top-0 z-20 border-b border-border bg-panel/70 px-4 py-3 backdrop-blur-xl">
         <div className="flex items-center gap-3">
+          {preferences.display.globalPwm ? (
           <div className="min-w-0 flex-1">
             <div className="mb-0.5 flex items-center justify-between">
               <span className="text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
@@ -92,6 +94,11 @@ export function IndexPage() {
               className="slider-run"
             />
           </div>
+          ) : (
+            <div className="min-w-0 flex-1 text-[12px] text-muted-foreground">
+              Painel de bombas
+            </div>
+          )}
           <button
             onClick={stopAll}
             disabled={!connected}
@@ -123,15 +130,25 @@ export function IndexPage() {
               />
             </div>
             <div className="mt-3 flex items-end justify-between gap-2">
-              <div
-                className={`font-mono text-[30px] leading-none font-semibold ${
-                  pump.running ? "text-foreground" : "text-faint"
-                }`}
-              >
-                {String(Math.round(pump.speed)).padStart(3, "0")}
-              </div>
+              {preferences.display.estimatedFlow ? (
+                <div
+                  className={`font-mono text-[30px] leading-none font-semibold ${
+                    pump.running ? "text-foreground" : "text-faint"
+                  }`}
+                >
+                  {String(Math.round(pump.speed)).padStart(3, "0")}
+                </div>
+              ) : (
+                <div
+                  className={`font-mono text-[30px] leading-none font-semibold ${
+                    pump.running ? "text-foreground" : "text-faint"
+                  }`}
+                >
+                  {pump.pwm.toFixed(0).padStart(3, "0")}
+                </div>
+              )}
               <div className="text-right text-[10px] leading-tight text-muted-foreground">
-                mL/min estim.
+                {preferences.display.estimatedFlow ? "mL/min estim." : "PWM %"}
                 <br />
                 {pump.running ? (
                   pump.direction === "forward" ? (

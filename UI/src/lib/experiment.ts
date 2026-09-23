@@ -1,4 +1,4 @@
-import { MOTOR_COUNT, newId } from "./calibration";
+import { newId } from "./calibration";
 
 export type BlockCategory = "logic" | "action" | "profile" | "io";
 
@@ -103,7 +103,6 @@ const KIND_META: Record<
   varVolume: { category: "io", fields: {} },
 };
 
-const PROGRAM_KEY = "bomba.experiment.v1";
 
 export function kindCategory(kind: BlockKind): BlockCategory {
   return KIND_META[kind].category;
@@ -309,37 +308,6 @@ export function sanitizeProgram(value: unknown): ExperimentBlock[] {
     .map(sanitizeBlock)
     .filter((item): item is ExperimentBlock => Boolean(item));
   return blocks;
-}
-
-export function loadPrograms(): ExperimentBlock[][] {
-  const fallback = Array.from({ length: MOTOR_COUNT }, () =>
-    createDefaultProgram(),
-  );
-  try {
-    const raw = localStorage.getItem(PROGRAM_KEY);
-    if (!raw) {
-      return fallback;
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== MOTOR_COUNT) {
-      return fallback;
-    }
-    return parsed.map((item) => sanitizeProgram(item));
-  } catch {
-    return fallback;
-  }
-}
-
-export function saveProgram(pumpId: number, program: ExperimentBlock[]) {
-  const all = loadPrograms();
-  const index = Math.max(0, Math.min(MOTOR_COUNT - 1, pumpId - 1));
-  all[index] = sanitizeProgram(program);
-  localStorage.setItem(PROGRAM_KEY, JSON.stringify(all));
-}
-
-export function loadProgram(pumpId: number): ExperimentBlock[] {
-  const index = Math.max(0, Math.min(MOTOR_COUNT - 1, pumpId - 1));
-  return loadPrograms()[index] ?? createDefaultProgram();
 }
 
 export function reporterLabel(kind: IoRef) {

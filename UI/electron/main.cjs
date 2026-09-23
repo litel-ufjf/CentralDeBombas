@@ -1,10 +1,12 @@
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const path = require("node:path");
 const { execFile, spawn } = require("node:child_process");
+const { createStore } = require("./db.cjs");
 
 let mainWindow = null;
 let serialChild = null;
 let closingSerial = false;
+let store = null;
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -254,7 +256,40 @@ ipcMain.handle("serial:write", async (_event, line) => {
   });
 });
 
-app.whenReady().then(() => {
+function requireStore() {
+  if (!store) {
+    throw new Error("Banco local ainda não está pronto.");
+  }
+  return store;
+}
+
+ipcMain.handle("store:currentUser", async () => requireStore().currentUser());
+ipcMain.handle("store:load", async () => requireStore().load());
+ipcMain.handle("store:saveCalibrations", async (_event, calibrations) =>
+  requireStore().saveCalibrations(calibrations),
+);
+ipcMain.handle("store:saveRecipes", async (_event, recipes) =>
+  requireStore().saveRecipes(recipes),
+);
+ipcMain.handle("store:saveCharts", async (_event, layouts) =>
+  requireStore().saveCharts(layouts),
+);
+ipcMain.handle("store:saveExperiments", async (_event, programs) =>
+  requireStore().saveExperiments(programs),
+);
+ipcMain.handle("store:importLocal", async (_event, snapshot) =>
+  requireStore().importLocal(snapshot),
+);
+ipcMain.handle("store:savePreferences", async (_event, preferences) =>
+  requireStore().savePreferences(preferences),
+);
+
+app.whenReady().then(async () => {
+  try {
+    store = await createStore(app.getPath("userData"));
+  } catch (error) {
+    console.error("Falha ao abrir o banco local:", error);
+  }
   Menu.setApplicationMenu(null);
   createWindow();
   app.on("activate", () => {
@@ -265,6 +300,11 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  try {
+    store?.flush();
+  } catch {
+    /* ignore */
+  }
   void closeSerial();
   if (process.platform !== "darwin") {
     app.quit();
@@ -272,5 +312,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  try {
+    store?.flush();
+  } catch {
+    /* ignore */
+  }
   void closeSerial();
 });

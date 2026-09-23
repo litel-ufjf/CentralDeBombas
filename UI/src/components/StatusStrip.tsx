@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useBench } from "../context/BenchContext";
 import logo from "../assets/logo.png";
 
@@ -40,9 +41,17 @@ export function StatusStrip() {
           {connected ? `Online · ${portLabel}` : "Desconectada"}
         </span>
       </div>
-      <span className="shrink-0 font-mono text-[11px] tracking-wider text-faint">
-        {clock}
-      </span>
+      <div className="flex shrink-0 items-center gap-3">
+        <Link
+          to="/configuracoes"
+          className="text-[11px] font-medium tracking-[0.12em] text-muted-foreground uppercase"
+        >
+          Configurações
+        </Link>
+        <span className="font-mono text-[11px] tracking-wider text-faint">
+          {clock}
+        </span>
+      </div>
     </div>
   );
 }

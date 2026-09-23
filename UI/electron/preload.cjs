@@ -15,4 +15,17 @@ contextBridge.exposeInMainWorld("bomba", {
     ipcRenderer.on("serial:closed", listener);
     return () => ipcRenderer.removeListener("serial:closed", listener);
   },
+  store: {
+    currentUser: () => ipcRenderer.invoke("store:currentUser"),
+    load: () => ipcRenderer.invoke("store:load"),
+    saveCalibrations: (calibrations) =>
+      ipcRenderer.invoke("store:saveCalibrations", calibrations),
+    saveRecipes: (recipes) => ipcRenderer.invoke("store:saveRecipes", recipes),
+    saveCharts: (layouts) => ipcRenderer.invoke("store:saveCharts", layouts),
+    saveExperiments: (programs) =>
+      ipcRenderer.invoke("store:saveExperiments", programs),
+    importLocal: (snapshot) => ipcRenderer.invoke("store:importLocal", snapshot),
+    savePreferences: (preferences) =>
+      ipcRenderer.invoke("store:savePreferences", preferences),
+  },
 });

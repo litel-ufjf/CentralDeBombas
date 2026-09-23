@@ -1,7 +1,7 @@
 {
   "name": "bomba-ui",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Painel desktop para bombas peristálticas via USB",
   "author": "Laboratório Litel — UFJF",
   "type": "module",
@@ -14,7 +14,8 @@
   "dependencies": {
     "@tanstack/react-router": "^1.132.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sql.js": "^1.14.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
@@ -48,6 +49,10 @@
       {
         "from": "electron/serial-host.ps1",
         "to": "serial-host.ps1"
+      },
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
       }
     ],
     "win": {
