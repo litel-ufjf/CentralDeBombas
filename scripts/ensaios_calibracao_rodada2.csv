@@ -1,0 +1,13 @@
+bomba,sentido,data_hora,modo,volume_ml,pwm_regime,pwm0,tempo_s,fluido,frasco_observado,frasco_capacidade_ml,graduacao_min_ml,graduacao_max_ml,pwm0_igual_nos_sentidos,fonte,observacao
+1,direto,2026-09-24T13:59:41-03:00,volume_fixo,150,90,28,98.6,agua,B,200,50,200,nao,app_dev,Leitura visual da escala de B; PWM0 pelo minimo que o motor gira.
+1,reverso,2026-09-24T13:54:29-03:00,volume_fixo,149.9,90,29,103.0,agua,B,200,50,200,nao,app_dev,Volume registrado 149.9 ml; PWM0 proprio deste sentido.
+2,direto,2026-09-24T14:17:03-03:00,volume_fixo,150,90,40,105.8,agua,B,200,50,200,nao,app_dev,Leitura visual da escala de B; PWM0 pelo minimo que o motor gira.
+2,reverso,2026-09-24T14:10:56-03:00,volume_fixo,150,90,36.5,109.0,agua,B,200,50,200,nao,app_dev,PWM0 proprio deste sentido (36.5 %).
+3,direto,2026-09-24T14:26:56-03:00,volume_fixo,150,90,40,104.7,agua,B,200,50,200,nao,app_dev,Leitura visual da escala de B; PWM0 pelo minimo que o motor gira.
+3,reverso,2026-09-24T14:32:15-03:00,volume_fixo,150,90,36.2,106.1,agua,B,200,50,200,nao,app_dev,PWM0 proprio deste sentido (36.2 %).
+4,direto,2026-09-24T14:38:14-03:00,volume_fixo,150,90,31,98.0,agua,B,200,50,200,nao,app_dev,Leitura visual da escala de B; PWM0 pelo minimo que o motor gira.
+4,reverso,2026-09-24T14:42:59-03:00,volume_fixo,150,90,32.7,101.8,agua,B,200,50,200,nao,app_dev,PWM0 proprio deste sentido (32.7 %).
+5,direto,2026-09-24T14:57:11-03:00,volume_fixo,150,90,39.5,108.4,agua,B,200,50,200,nao,app_dev,PWM0 proprio deste sentido (39.5 %).
+5,reverso,2026-09-24T14:53:30-03:00,volume_fixo,150,90,38,102.8,agua,B,200,50,200,nao,app_dev,PWM0 proprio deste sentido (38 %).
+6,direto,2026-09-24T15:04:00-03:00,volume_fixo,150,90,27,96.1,agua,B,200,50,200,sim,app_dev,PWM0 igual nos dois sentidos nesta rodada.
+6,reverso,2026-09-24T15:07:05-03:00,volume_fixo,150,90,27,90.6,agua,B,200,50,200,sim,app_dev,PWM0 igual nos dois sentidos nesta rodada.
