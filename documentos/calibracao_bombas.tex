@@ -1,0 +1,396 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage[
+  a4paper,
+  top=22mm,
+  bottom=24mm,
+  left=22mm,
+  right=22mm
+]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+
+\definecolor{navy}{HTML}{1D4F91}
+\definecolor{ink}{HTML}{243247}
+\definecolor{muted}{HTML}{5C6B7A}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=navy,
+  urlcolor=navy,
+  pdftitle={Calibração das bombas peristálticas},
+  pdfauthor={Laboratório Litel --- UFJF / Copasa}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{muted}Laboratório Litel --- UFJF}
+\fancyhead[R]{\small\color{muted}Calibração das bombas}
+\fancyfoot[C]{\small\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\titleformat{\section}{\Large\bfseries\color{navy}}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\large\bfseries\color{ink}}{\thesubsection}{0.6em}{}
+\setlist[itemize]{topsep=0.35em,itemsep=0.2em}
+\setlist[enumerate]{topsep=0.35em,itemsep=0.25em}
+\captionsetup{font=small,labelfont={bf,color=navy}, skip=4pt}
+
+\newcommand{\app}{\emph{Painel de Bombas}}
+\newcommand{\fig}[3]{%
+  \begin{figure}[ht]
+    \centering
+    \includegraphics[width=#1\textwidth]{#2}
+    \caption{#3}
+  \end{figure}
+}
+
+\newcommand{\pwmz}{\mathrm{PWM}_0}
+
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+  \thispagestyle{empty}
+  \color{navy}
+  \rule{\textwidth}{3pt}\\[2mm]
+  {\large Laboratório Litel \textbullet\ Universidade Federal de Juiz de Fora}\\[1mm]
+  {\large Projeto em parceria com a Copasa}\\[8mm]
+  {\Huge\bfseries Calibração das bombas}\\[2mm]
+  {\LARGE\bfseries peristálticas}\\[3mm]
+  {\LARGE Duas campanhas de bancada (22--24 de setembro de 2026)}\\[10mm]
+  \noindent\makebox[\textwidth][c]{%
+    \includegraphics[height=15mm]{figuras/logo.png}\hspace{10mm}%
+    \includegraphics[height=14mm]{figuras/ufjf.png}\hspace{10mm}%
+    \includegraphics[height=9mm]{figuras/copasa.png}%
+  }\\[8mm]
+  \color{ink}
+  {Método dos frascos A/B, ensaios de volume fixo e curvas médias
+  $Q(\mathrm{PWM})$ adotadas a partir das duas rodadas.}\\[8mm]
+  \color{muted}
+  {Fluido: água \quad\textbullet\quad Seis bombas, dois sentidos \quad\textbullet\quad Setembro de 2026}\\[2mm]
+  \rule{\textwidth}{0.6pt}
+  \vfill
+  \normalsize\color{ink}
+  Os dados brutos e os gráficos interativos estão em \texttt{scripts/}
+  (\texttt{analise\_calibracao.ipynb} e \texttt{media\_curvas\_calibracao.ipynb}).
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\tableofcontents
+\newpage
+
+\section{O que foi feito}
+
+A bancada tem seis bombas peristálticas (P01 a P06). Não há sensor de fluxo:
+o \app{} estima a vazão pelo modelo da seção~\ref{sec:modelo}. Para alimentar
+esse modelo, foram feitas \textbf{duas campanhas} com o mesmo método, em dias
+seguidos.
+
+\begin{itemize}
+  \item \textbf{Rodada 1} --- 22 e 23/09/2026. P04--P06 no dia 22 (aplicativo
+        instalado); P01--P03 no dia 23 (sessão de desenvolvimento). Um ensaio
+        por bomba e sentido.
+  \item \textbf{Rodada 2} --- 24/09/2026. As seis bombas de novo, nos dois
+        sentidos. Um ensaio por bomba e sentido.
+\end{itemize}
+
+Cada parâmetro (bomba $\times$ sentido) tem portanto \textbf{duas medidas}.
+Este texto documenta o método, lista os cronômetros e apresenta a
+\textbf{média das curvas} das duas rodadas --- o conjunto que deve ser
+considerado a calibração atual da bancada.
+
+\section{Bancada e leitura de volume}
+
+Dois frascos graduados de \textbf{200\,ml}, escala útil de 50\,ml a 200\,ml:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Frasco & Posição & Papel \\
+\midrule
+\textbf{A} & esquerda & reservatório / destino da outra mangueira \\
+\textbf{B} & direita & \textbf{frasco observado} --- o volume é lido nesta escala \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Cada bomba tem duas mangueiras: uma vai a~A, a outra a~B. O sentido
+\emph{direto} empurra o líquido num sentido; o \emph{reverso} inverte o fluxo.
+Em ambos os casos o operador cronometra o deslocamento de um volume fixo
+\textbf{visto em~B} (subida ou descida do menisco, conforme o sentido).
+
+A leitura é visual. Não há sensor na linha. A vazão do painel é estimada.
+
+\section{Modelo}
+\label{sec:modelo}
+
+Abaixo da zona morta o motor não vence o atrito nem a pressão da mangueira:
+
+\begin{equation}
+Q(\mathrm{PWM}) =
+\begin{cases}
+0 & \text{se }\mathrm{PWM} < \pwmz, \\
+a\,(\mathrm{PWM} - \pwmz) & \text{se }\mathrm{PWM} \ge \pwmz.
+\end{cases}
+\end{equation}
+
+PWM e $\pwmz$ estão em~\%; $Q$ em~ml/min; $a$ em~ml/min por ponto percentual.
+
+Com um ensaio de volume fixo $V$ cronometrado em $t$ (segundos),
+
+\begin{equation}
+Q = \frac{60\,V}{t},
+\qquad
+a = \frac{Q}{\mathrm{PWM}_{\mathrm{regime}} - \pwmz}.
+\end{equation}
+
+Nesta campanha o PWM de regime foi \textbf{90\,\%} e o volume alvo,
+\textbf{150\,ml} (um ensaio da rodada~2 registrou 149,9\,ml). Cada ensaio
+ancora uma reta no ponto operacional e no $\pwmz$ empírico. A ``curva'' não é
+um ajuste com vários PWM: é o modelo linear por partes do painel.
+
+Com duas rodadas, a curva média é a média \textbf{ponto a ponto}:
+
+\begin{equation}
+Q_{\text{média}}(\mathrm{PWM})
+  = \frac{Q_1(\mathrm{PWM}) + Q_2(\mathrm{PWM})}{2}.
+\end{equation}
+
+Se os $\pwmz$ diferem, a média só sobe depois do menor limiar; entre os dois
+valores um ensaio ainda vale zero. Em paralelo, cada parâmetro ganha a média
+aritmética das duas medidas ($\overline{\pwmz}$, $\bar a$, $\bar Q$).
+A reta $(\overline{\pwmz},\bar a)$ é o par que o painel usaria se adotasse a
+média dos coeficientes. Ela não coincide exatamente com $Q_{\text{média}}$
+quando os limiares diferem.
+
+\section{Método --- o mesmo nas duas rodadas}
+
+Calibrar \textbf{uma bomba por vez}. Não ligar as outras durante o ensaio.
+
+\subsection{Zona morta \texorpdfstring{$\pwmz$}{PWM0}}
+
+\begin{enumerate}
+  \item Mangueiras já conectadas a A e B, com água (sem ar na linha, se possível).
+  \item Subir o PWM em degraus até o rotor \textbf{começar a girar de forma contínua}.
+  \item Anotar esse PWM como $\pwmz$ daquela bomba (e daquele sentido, se houver diferença).
+  \item Repetir no outro sentido. Se a diferença for pequena, pode-se adotar o
+        mesmo $\pwmz$ nos dois sentidos.
+\end{enumerate}
+
+É uma aproximação de bancada, não um limiar medido com tacômetro. Na rodada~1
+o mesmo $\pwmz$ foi adotado nos dois sentidos em todas as bombas. Na rodada~2
+vários pares ficaram com $\pwmz$ \textbf{próprio de cada sentido} (exceto a P06).
+
+\subsection{Ensaio de vazão (volume fixo)}
+
+\begin{enumerate}
+  \item PWM de regime \textbf{90\,\%}; estabilização de cerca de 1\,s no painel.
+  \item Escolher o sentido (direto ou reverso).
+  \item Cronometrar até o volume em \textbf{B} deslocar o alvo (150\,ml).
+  \item Registrar $V$, $t$, PWM, sentido e $\pwmz$.
+  \item Inverter o sentido e repetir.
+\end{enumerate}
+
+O painel também permite ensaio de tempo fixo (informa-se $V$ depois). Os dados
+destas duas campanhas são todos de volume fixo.
+
+\section{Rodada 1 --- 22 e 23 de setembro}
+
+Água; frascos 200\,ml; observação em B; 150\,ml @ 90\,\%.
+$\pwmz$ igual nos dois sentidos.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Ensaios da rodada 1. $Q$ e $a$ recalculados do cronômetro.}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}clrrrrr@{}}
+\toprule
+Bomba & Sentido & Data & $\pwmz$ (\%) & $t$ (s) & $Q$ (ml/min) & $a$ \\
+\midrule
+P01 & direto  & 23/09 & 27 & 97,2 & 92,59 & 1,470 \\
+P01 & reverso & 23/09 & 27 & 99,5 & 90,45 & 1,436 \\
+P02 & direto  & 23/09 & 40 & 105,7 & 85,15 & 1,703 \\
+P02 & reverso & 23/09 & 40 & 99,8 & 90,18 & 1,804 \\
+P03 & direto  & 23/09 & 33 & 106,2 & 84,75 & 1,487 \\
+P03 & reverso & 23/09 & 33 & 113,0 & 79,65 & 1,397 \\
+P04 & direto  & 22/09 & 33 & 100,5 & 89,55 & 1,571 \\
+P04 & reverso & 22/09 & 33 & 104,3 & 86,29 & 1,514 \\
+P05 & direto  & 22/09 & 35 & 111,3 & 80,86 & 1,470 \\
+P05 & reverso & 22/09 & 35 & 107,3 & 83,88 & 1,525 \\
+P06 & direto  & 22/09 & 29 & 89,0 & 101,12 & 1,658 \\
+P06 & reverso & 22/09 & 29 & 98,6 & 91,28 & 1,496 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Nesta rodada a P06 foi a mais assimétrica (direto cerca de 11\,\% mais rápido
+que o reverso @ 90\,\%). A P02 teve a maior zona morta (40\,\%).
+
+\fig{0.98}{figuras/curvas_por_bomba.png}{Rodada 1: $Q=0$ até $\pwmz$ e reta que passa pelo ensaio de 90\,\%, por bomba e sentido.}
+
+\fig{0.98}{figuras/comparativo_seis_bombas.png}{Rodada 1: as seis bombas no mesmo eixo, direto e reverso.}
+
+\fig{0.98}{figuras/pwm0_e_assimetria.png}{Rodada 1: $\pwmz$ adotado, coeficiente $a$ e assimetria direto/reverso @ 90\,\%.}
+
+\section{Rodada 2 --- 24 de setembro}
+
+Mesmo método. Nesta campanha o $\pwmz$ foi reavaliado por sentido. O reverso
+da P01 foi registrado com 149,9\,ml.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Ensaios da rodada 2. $Q$ e $a$ recalculados do cronômetro.}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}clrrrrr@{}}
+\toprule
+Bomba & Sentido & $\pwmz$ (\%) & $t$ (s) & $V$ (ml) & $Q$ (ml/min) & $a$ \\
+\midrule
+P01 & direto  & 28 & 98,6 & 150 & 91,28 & 1,472 \\
+P01 & reverso & 29 & 103,0 & 149,9 & 87,32 & 1,431 \\
+P02 & direto  & 40 & 105,8 & 150 & 85,07 & 1,701 \\
+P02 & reverso & 36,5 & 109,0 & 150 & 82,57 & 1,543 \\
+P03 & direto  & 40 & 104,7 & 150 & 85,96 & 1,719 \\
+P03 & reverso & 36,2 & 106,1 & 150 & 84,83 & 1,577 \\
+P04 & direto  & 31 & 98,0 & 150 & 91,84 & 1,557 \\
+P04 & reverso & 32,7 & 101,8 & 150 & 88,41 & 1,543 \\
+P05 & direto  & 39,5 & 108,4 & 150 & 83,03 & 1,644 \\
+P05 & reverso & 38 & 102,8 & 150 & 87,55 & 1,684 \\
+P06 & direto  & 27 & 96,1 & 150 & 93,65 & 1,487 \\
+P06 & reverso & 27 & 90,6 & 150 & 99,34 & 1,577 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{As duas rodadas juntas}
+
+\subsection{Média de cada parâmetro}
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\caption{Média das duas medidas e desvio relativo de $Q$ @ 90\,\%,
+$(Q_2-Q_1)/Q_1$.}
+\setlength{\tabcolsep}{3.6pt}
+\begin{tabular}{@{}clrrrrrrr@{}}
+\toprule
+Bomba & Sentido & $\pwmz$ r1 & $\pwmz$ r2 & $\overline{\pwmz}$
+  & $Q$ r1 & $Q$ r2 & $\bar Q$ & $\Delta Q$ (\%) \\
+\midrule
+P01 & direto  & 27 & 28 & 27,5 & 92,59 & 91,28 & 91,94 & $-1,4$ \\
+P01 & reverso & 27 & 29 & 28,0 & 90,45 & 87,32 & 88,89 & $-3,5$ \\
+P02 & direto  & 40 & 40 & 40,0 & 85,15 & 85,07 & 85,11 & $-0,1$ \\
+P02 & reverso & 40 & 36,5 & 38,3 & 90,18 & 82,57 & 86,37 & $-8,4$ \\
+P03 & direto  & 33 & 40 & 36,5 & 84,75 & 85,96 & 85,35 & $+1,4$ \\
+P03 & reverso & 33 & 36,2 & 34,6 & 79,65 & 84,83 & 82,24 & $+6,5$ \\
+P04 & direto  & 33 & 31 & 32,0 & 89,55 & 91,84 & 90,69 & $+2,6$ \\
+P04 & reverso & 33 & 32,7 & 32,9 & 86,29 & 88,41 & 87,35 & $+2,5$ \\
+P05 & direto  & 35 & 39,5 & 37,3 & 80,86 & 83,03 & 81,94 & $+2,7$ \\
+P05 & reverso & 35 & 38 & 36,5 & 83,88 & 87,55 & 85,71 & $+4,4$ \\
+P06 & direto  & 29 & 27 & 28,0 & 101,12 & 93,65 & 97,39 & $-7,4$ \\
+P06 & reverso & 29 & 27 & 28,0 & 91,28 & 99,34 & 95,31 & $+8,8$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A P01 e o direto da P02 repetiram quase iguais. A maior mudança de vazão foi
+a P06 (reverso $+8{,}8$\,\%, direto $-7{,}4$\,\%). A maior mudança de
+$\pwmz$ foi o direto da P03 (33\,\% $\to$ 40\,\%).
+
+\subsection{Curvas médias}
+
+Nas figuras, a linha clara pontilhada é a rodada~1; a tracejada, a rodada~2;
+a linha cheia é $Q_{\text{média}}$. A reta traço-ponto é o modelo
+$(\overline{\pwmz},\bar a)$.
+
+\fig{0.98}{figuras/curvas_media_por_bomba.png}{Curvas das duas rodadas e a média ponto a ponto, por bomba.}
+
+\fig{0.98}{figuras/comparativo_curvas_medias.png}{As seis curvas médias no mesmo eixo.}
+
+\fig{0.98}{figuras/repetibilidade_duas_rodadas.png}{$\pwmz$, $a$ e $Q$ @ 90\,\% nas duas rodadas e na média; desvio de $Q$ entre os dias.}
+
+\section{Valores adotáveis no painel}
+
+A tabela abaixo resume o par médio $(\overline{\pwmz},\bar a)$ e a vazão média
+medida em 90\,\%. São os números recomendados se o painel for atualizado com
+a calibração dos dois dias.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Calibração adotável: média das duas rodadas.}
+\begin{tabular}{@{}clrrr@{}}
+\toprule
+Bomba & Sentido & $\overline{\pwmz}$ (\%) & $\bar a$ & $\bar Q$ @ 90\,\% (ml/min) \\
+\midrule
+P01 & direto  & 27,5 & 1,471 & 91,94 \\
+P01 & reverso & 28,0 & 1,434 & 88,89 \\
+P02 & direto  & 40,0 & 1,702 & 85,11 \\
+P02 & reverso & 38,3 & 1,673 & 86,37 \\
+P03 & direto  & 36,5 & 1,603 & 85,35 \\
+P03 & reverso & 34,6 & 1,487 & 82,24 \\
+P04 & direto  & 32,0 & 1,564 & 90,69 \\
+P04 & reverso & 32,9 & 1,528 & 87,35 \\
+P05 & direto  & 37,3 & 1,557 & 81,94 \\
+P05 & reverso & 36,5 & 1,604 & 85,71 \\
+P06 & direto  & 28,0 & 1,572 & 97,39 \\
+P06 & reverso & 28,0 & 1,537 & 95,31 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No \app{}, use o sentido próprio (Direto / Reverso) em vez de Ambos: as
+curvas não são simétricas.
+
+\section{Incerteza}
+
+Os frascos vão de 50\,ml a 200\,ml. O alvo de 150\,ml cabe na escala; o
+menisco é lido a olho. Se a incerteza de volume for da ordem de
+$\delta V \approx 5\,\mathrm{ml}$ e a do cronômetro
+$\delta t \approx 0{,}5\,\mathrm{s}$,
+
+\begin{equation}
+\frac{\delta Q}{Q}
+  \approx \sqrt{\left(\frac{\delta V}{V}\right)^2 + \left(\frac{\delta t}{t}\right)^2}.
+\end{equation}
+
+Com $V=150\,\mathrm{ml}$ e $t\sim 100\,\mathrm{s}$ isso dá cerca de
+\textbf{3--4\,\%} em $Q$ (e portanto em $a$), dominado pelo volume.
+$\pwmz$ é mais grosseiro: um degrau na busca do ``começou a girar''.
+
+O modelo é operacional para o painel, não um certificado metrológico. Os
+desvios de 7--9\,\% vistos na P06 (e no reverso da P02) estão acima dessa
+faixa de leitura: há variação real de um dia para o outro (montagem,
+mangueira, $\pwmz$ reavaliado). A média das duas rodadas reduz o peso de um
+único ensaio.
+
+\section{Arquivos}
+
+\begin{itemize}
+  \item \texttt{scripts/ensaios\_calibracao.csv} --- rodada 1
+  \item \texttt{scripts/ensaios\_calibracao\_rodada2.csv} --- rodada 2
+  \item \texttt{scripts/analise\_calibracao.ipynb} --- curvas da primeira campanha
+  \item \texttt{scripts/media\_curvas\_calibracao.ipynb} --- médias das duas rodadas
+\end{itemize}
+
+Dependências do notebook: \texttt{pip install -r scripts/requirements.txt}.
+
+\vspace{1.2em}
+{\small\color{muted}Laboratório Litel --- UFJF, em parceria com a Copasa.
+Calibração das bombas peristálticas, setembro de 2026.}
+
+\end{document}
