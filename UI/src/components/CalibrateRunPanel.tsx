@@ -21,7 +21,15 @@ function formatClock(seconds: number) {
   return `${String(m).padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}`;
 }
 
-export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
+export function CalibrateRunPanel({
+  pumpId,
+  embedded = false,
+  hideTitle = false,
+}: {
+  pumpId: number;
+  embedded?: boolean;
+  hideTitle?: boolean;
+}) {
   const {
     connected,
     pumps,
@@ -198,11 +206,19 @@ export function CalibrateRunPanel({ pumpId }: { pumpId: number }) {
   const busy = phase !== "setup" && phase !== "done";
 
   return (
-    <div className="rounded-[14px] bg-foreground/4 p-4 ring-1 ring-border">
-      <p className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
-        Calibrar
-      </p>
-      <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+    <div
+      className={
+        embedded ? "" : "rounded-[14px] bg-foreground/4 p-4 ring-1 ring-border"
+      }
+    >
+      {hideTitle ? null : (
+        <p className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+          Calibrar
+        </p>
+      )}
+      <p
+        className={`${hideTitle ? "" : "mt-2 "}text-[12px] leading-relaxed text-muted-foreground`}
+      >
         A bomba sobe no PWM de regime, espera o transitório (mangueira com
         líquido, sem ar) e só então mede a vazão. O coeficiente usa
         a = Q / (PWM − PWM₀).

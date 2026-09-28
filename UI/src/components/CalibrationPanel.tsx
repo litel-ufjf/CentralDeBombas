@@ -17,12 +17,16 @@ export function CalibrationPanel({
   onChange,
   onSaveHistory,
   onApplyHistory,
+  embedded = false,
+  hideTitle = false,
 }: {
   set: PumpCalibrationSet;
   activeRecordIds?: Array<string | undefined>;
   onChange: (scope: CalibrationScope, calibration: Calibration) => void;
   onSaveHistory: (scope: CalibrationScope, name: string) => void;
   onApplyHistory: (record: CalibrationRecord) => void;
+  embedded?: boolean;
+  hideTitle?: boolean;
 }) {
   const [scope, setScope] = useState<CalibrationScope>("both");
   const [name, setName] = useState("");
@@ -36,11 +40,19 @@ export function CalibrationPanel({
         : set.both;
 
   return (
-    <div className="rounded-[14px] bg-foreground/4 p-4 ring-1 ring-border">
-      <p className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
-        Calibração com zona morta
-      </p>
-      <p className="mt-2 font-mono text-[12px] leading-relaxed text-faint">
+    <div
+      className={
+        embedded ? "" : "rounded-[14px] bg-foreground/4 p-4 ring-1 ring-border"
+      }
+    >
+      {hideTitle ? null : (
+        <p className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+          Calibração com zona morta
+        </p>
+      )}
+      <p
+        className={`${hideTitle ? "" : "mt-2 "}font-mono text-[12px] leading-relaxed text-faint`}
+      >
         Q = 0 se PWM &lt; PWM₀
         <br />
         Q = a × (PWM − PWM₀) se PWM ≥ PWM₀

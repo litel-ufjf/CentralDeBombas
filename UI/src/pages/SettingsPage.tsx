@@ -26,13 +26,13 @@ const DISPLAY_OPTIONS: { key: keyof DisplayPreferences; label: string; hint: str
   },
   {
     key: "calibrateRun",
-    label: "Ensaio Calibrar",
-    hint: "Assistente de volume fixo ou tempo fixo.",
+    label: "Calibrar",
+    hint: "Aba do ensaio de volume fixo ou tempo fixo.",
   },
   {
     key: "calibrationEditor",
-    label: "Zona morta e histórico",
-    hint: "Coeficientes a, PWM₀ e lista de ensaios.",
+    label: "Zona morta",
+    hint: "Aba para definir a, PWM₀ e consultar o histórico.",
   },
   {
     key: "experiment",

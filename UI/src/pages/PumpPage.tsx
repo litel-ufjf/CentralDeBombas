@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
-import { CalibrateRunPanel } from "../components/CalibrateRunPanel";
-import { CalibrationPanel } from "../components/CalibrationPanel";
+import { CalibrationTabs } from "../components/CalibrationTabs";
 import { ConnectBar } from "../components/ConnectBar";
 import { ExperimentModal } from "../components/ExperimentModal";
 import { PumpMonitor } from "../components/PumpMonitor";
@@ -11,7 +10,7 @@ import {
   maxFlowFromCalibration,
   type PumpDirection,
 } from "../lib/calibration";
-import { resolveCalibration, sourceLabel } from "../lib/preferences";
+import { sourceLabel } from "../lib/preferences";
 
 export function PumpPage() {
   const { id } = useParams({ from: "/bomba/$id" });
@@ -217,41 +216,22 @@ export function PumpPage() {
           </button>
         ) : null}
 
-        {preferences.display.calibrateRun ? (
-          <div className="mt-8">
-            <CalibrateRunPanel key={pump.id} pumpId={pump.id} />
-          </div>
-        ) : null}
-
-        {preferences.display.calibrationEditor ? (
-          <div className="mt-6">
-            <CalibrationPanel
-              set={pump.calibrationSet}
-              activeRecordIds={[
-                resolveCalibration(
-                  pump.calibrationSet,
-                  "forward",
-                  preferences,
-                  pump.id,
-                ).record?.id,
-                resolveCalibration(
-                  pump.calibrationSet,
-                  "reverse",
-                  preferences,
-                  pump.id,
-                ).record?.id,
-              ]}
-              onChange={(scope, calibration) =>
-                setCalibration(pump.id, scope, calibration)
-              }
-              onSaveHistory={(scope, name) =>
-                saveCalibrationHistory(pump.id, scope, name)
-              }
-              onApplyHistory={(record) =>
-                applyCalibrationHistory(pump.id, record)
-              }
-            />
-          </div>
+        {preferences.display.calibrateRun ||
+        preferences.display.calibrationEditor ? (
+          <CalibrationTabs
+            pumpId={pump.id}
+            set={pump.calibrationSet}
+            preferences={preferences}
+            onChange={(scope, calibration) =>
+              setCalibration(pump.id, scope, calibration)
+            }
+            onSaveHistory={(scope, name) =>
+              saveCalibrationHistory(pump.id, scope, name)
+            }
+            onApplyHistory={(record) =>
+              applyCalibrationHistory(pump.id, record)
+            }
+          />
         ) : null}
 
         {preferences.display.charts ? (
