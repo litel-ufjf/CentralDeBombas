@@ -161,6 +161,8 @@ Nesta campanha o PWM de regime foi \textbf{90\,\%} e o volume alvo,
 \textbf{150\,ml} (um ensaio da rodada~2 registrou 149,9\,ml). Cada ensaio
 ancora uma reta no ponto operacional e no $\pwmz$ empírico. A ``curva'' não é
 um ajuste com vários PWM: é o modelo linear por partes do painel.
+A vazão em 100\,\% não foi cronometrada: extrapola-se
+$Q_{100}=a(100-\pwmz)$.
 
 Com duas rodadas, a curva média é a média \textbf{ponto a ponto}:
 
@@ -215,24 +217,25 @@ $\pwmz$ igual nos dois sentidos.
 \begin{table}[ht]
 \centering
 \small
-\caption{Ensaios da rodada 1. $Q$ e $a$ recalculados do cronômetro.}
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{@{}clrrrrr@{}}
+\caption{Ensaios da rodada 1. $Q_{90}$ medido no cronômetro;
+$Q_{100}=a(100-\pwmz)$ pelo modelo.}
+\setlength{\tabcolsep}{4.2pt}
+\begin{tabular}{@{}clrrrrrr@{}}
 \toprule
-Bomba & Sentido & Data & $\pwmz$ (\%) & $t$ (s) & $Q$ (ml/min) & $a$ \\
+Bomba & Sentido & Data & $\pwmz$ (\%) & $t$ (s) & $Q_{90}$ & $Q_{100}$ & $a$ \\
 \midrule
-P01 & direto  & 23/09 & 27 & 97,2 & 92,59 & 1,470 \\
-P01 & reverso & 23/09 & 27 & 99,5 & 90,45 & 1,436 \\
-P02 & direto  & 23/09 & 40 & 105,7 & 85,15 & 1,703 \\
-P02 & reverso & 23/09 & 40 & 99,8 & 90,18 & 1,804 \\
-P03 & direto  & 23/09 & 33 & 106,2 & 84,75 & 1,487 \\
-P03 & reverso & 23/09 & 33 & 113,0 & 79,65 & 1,397 \\
-P04 & direto  & 22/09 & 33 & 100,5 & 89,55 & 1,571 \\
-P04 & reverso & 22/09 & 33 & 104,3 & 86,29 & 1,514 \\
-P05 & direto  & 22/09 & 35 & 111,3 & 80,86 & 1,470 \\
-P05 & reverso & 22/09 & 35 & 107,3 & 83,88 & 1,525 \\
-P06 & direto  & 22/09 & 29 & 89,0 & 101,12 & 1,658 \\
-P06 & reverso & 22/09 & 29 & 98,6 & 91,28 & 1,496 \\
+P01 & direto  & 23/09 & 27 & 97,2 & 92,59 & 107,29 & 1,470 \\
+P01 & reverso & 23/09 & 27 & 99,5 & 90,45 & 104,81 & 1,436 \\
+P02 & direto  & 23/09 & 40 & 105,7 & 85,15 & 102,18 & 1,703 \\
+P02 & reverso & 23/09 & 40 & 99,8 & 90,18 & 108,22 & 1,804 \\
+P03 & direto  & 23/09 & 33 & 106,2 & 84,75 & 99,61 & 1,487 \\
+P03 & reverso & 23/09 & 33 & 113,0 & 79,65 & 93,62 & 1,397 \\
+P04 & direto  & 22/09 & 33 & 100,5 & 89,55 & 105,26 & 1,571 \\
+P04 & reverso & 22/09 & 33 & 104,3 & 86,29 & 101,43 & 1,514 \\
+P05 & direto  & 22/09 & 35 & 111,3 & 80,86 & 95,56 & 1,470 \\
+P05 & reverso & 22/09 & 35 & 107,3 & 83,88 & 99,13 & 1,525 \\
+P06 & direto  & 22/09 & 29 & 89,0 & 101,12 & 117,70 & 1,658 \\
+P06 & reverso & 22/09 & 29 & 98,6 & 91,28 & 106,24 & 1,496 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -240,7 +243,7 @@ P06 & reverso & 22/09 & 29 & 98,6 & 91,28 & 1,496 \\
 Nesta rodada a P06 foi a mais assimétrica (direto cerca de 11\,\% mais rápido
 que o reverso @ 90\,\%). A P02 teve a maior zona morta (40\,\%).
 
-\fig{0.98}{figuras/curvas_por_bomba.png}{Rodada 1: $Q=0$ até $\pwmz$ e reta que passa pelo ensaio de 90\,\%, por bomba e sentido.}
+\fig{0.98}{figuras/curvas_por_bomba.png}{Rodada 1: $Q=0$ até $\pwmz$. Círculo: $Q$ medido @ 90\,\%. Losango: $Q_{100}$ do modelo.}
 
 \fig{0.98}{figuras/comparativo_seis_bombas.png}{Rodada 1: as seis bombas no mesmo eixo, direto e reverso.}
 
@@ -254,24 +257,25 @@ da P01 foi registrado com 149,9\,ml.
 \begin{table}[ht]
 \centering
 \small
-\caption{Ensaios da rodada 2. $Q$ e $a$ recalculados do cronômetro.}
-\setlength{\tabcolsep}{5pt}
+\caption{Ensaios da rodada 2. $Q_{90}$ medido; $Q_{100}=a(100-\pwmz)$.
+O reverso da P01 usou 149,9\,ml; os demais, 150\,ml.}
+\setlength{\tabcolsep}{4.2pt}
 \begin{tabular}{@{}clrrrrr@{}}
 \toprule
-Bomba & Sentido & $\pwmz$ (\%) & $t$ (s) & $V$ (ml) & $Q$ (ml/min) & $a$ \\
+Bomba & Sentido & $\pwmz$ (\%) & $t$ (s) & $Q_{90}$ & $Q_{100}$ & $a$ \\
 \midrule
-P01 & direto  & 28 & 98,6 & 150 & 91,28 & 1,472 \\
-P01 & reverso & 29 & 103,0 & 149,9 & 87,32 & 1,431 \\
-P02 & direto  & 40 & 105,8 & 150 & 85,07 & 1,701 \\
-P02 & reverso & 36,5 & 109,0 & 150 & 82,57 & 1,543 \\
-P03 & direto  & 40 & 104,7 & 150 & 85,96 & 1,719 \\
-P03 & reverso & 36,2 & 106,1 & 150 & 84,83 & 1,577 \\
-P04 & direto  & 31 & 98,0 & 150 & 91,84 & 1,557 \\
-P04 & reverso & 32,7 & 101,8 & 150 & 88,41 & 1,543 \\
-P05 & direto  & 39,5 & 108,4 & 150 & 83,03 & 1,644 \\
-P05 & reverso & 38 & 102,8 & 150 & 87,55 & 1,684 \\
-P06 & direto  & 27 & 96,1 & 150 & 93,65 & 1,487 \\
-P06 & reverso & 27 & 90,6 & 150 & 99,34 & 1,577 \\
+P01 & direto  & 28 & 98,6 & 91,28 & 106,00 & 1,472 \\
+P01 & reverso & 29 & 103,0 & 87,32 & 101,64 & 1,431 \\
+P02 & direto  & 40 & 105,8 & 85,07 & 102,08 & 1,701 \\
+P02 & reverso & 36,5 & 109,0 & 82,57 & 98,00 & 1,543 \\
+P03 & direto  & 40 & 104,7 & 85,96 & 103,15 & 1,719 \\
+P03 & reverso & 36,2 & 106,1 & 84,83 & 100,59 & 1,577 \\
+P04 & direto  & 31 & 98,0 & 91,84 & 107,40 & 1,557 \\
+P04 & reverso & 32,7 & 101,8 & 88,41 & 103,84 & 1,543 \\
+P05 & direto  & 39,5 & 108,4 & 83,03 & 99,47 & 1,644 \\
+P05 & reverso & 38 & 102,8 & 87,55 & 104,38 & 1,684 \\
+P06 & direto  & 27 & 96,1 & 93,65 & 108,52 & 1,487 \\
+P06 & reverso & 27 & 90,6 & 99,34 & 115,11 & 1,577 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -317,38 +321,41 @@ Nas figuras, a linha clara pontilhada é a rodada~1; a tracejada, a rodada~2;
 a linha cheia é $Q_{\text{média}}$. A reta traço-ponto é o modelo
 $(\overline{\pwmz},\bar a)$.
 
-\fig{0.98}{figuras/curvas_media_por_bomba.png}{Curvas das duas rodadas e a média ponto a ponto, por bomba.}
+\fig{0.98}{figuras/curvas_media_por_bomba.png}{Curvas das duas rodadas e a média. Círculo @ 90\,\% (medido); losango @ 100\,\% (modelo).}
 
-\fig{0.98}{figuras/comparativo_curvas_medias.png}{As seis curvas médias no mesmo eixo.}
+\fig{0.98}{figuras/comparativo_curvas_medias.png}{As seis curvas médias. Losango: $Q_{100}$.}
 
 \fig{0.98}{figuras/repetibilidade_duas_rodadas.png}{$\pwmz$, $a$ e $Q$ @ 90\,\% nas duas rodadas e na média; desvio de $Q$ entre os dias.}
 
 \section{Valores adotáveis no painel}
 
-A tabela abaixo resume o par médio $(\overline{\pwmz},\bar a)$ e a vazão média
-medida em 90\,\%. São os números recomendados se o painel for atualizado com
-a calibração dos dois dias.
+A tabela abaixo resume o par médio $(\overline{\pwmz},\bar a)$, a vazão média
+medida em 90\,\% e a vazão em 100\,\% pelo modelo,
+$Q_{100}=a(100-\pwmz)$, média ponto a ponto das duas retas. São os números
+recomendados se o painel for atualizado com a calibração dos dois dias.
 
 \begin{table}[ht]
 \centering
 \small
-\caption{Calibração adotável: média das duas rodadas.}
-\begin{tabular}{@{}clrrr@{}}
+\caption{Calibração adotável: média das duas rodadas.
+$Q_{90}$ medido; $Q_{100}$ extrapolado pelo modelo.}
+\begin{tabular}{@{}clrrrr@{}}
 \toprule
-Bomba & Sentido & $\overline{\pwmz}$ (\%) & $\bar a$ & $\bar Q$ @ 90\,\% (ml/min) \\
+Bomba & Sentido & $\overline{\pwmz}$ (\%) & $\bar a$
+  & $Q_{90}$ & $Q_{100}$ \\
 \midrule
-P01 & direto  & 27,5 & 1,471 & 91,94 \\
-P01 & reverso & 28,0 & 1,434 & 88,89 \\
-P02 & direto  & 40,0 & 1,702 & 85,11 \\
-P02 & reverso & 38,3 & 1,673 & 86,37 \\
-P03 & direto  & 36,5 & 1,603 & 85,35 \\
-P03 & reverso & 34,6 & 1,487 & 82,24 \\
-P04 & direto  & 32,0 & 1,564 & 90,69 \\
-P04 & reverso & 32,9 & 1,528 & 87,35 \\
-P05 & direto  & 37,3 & 1,557 & 81,94 \\
-P05 & reverso & 36,5 & 1,604 & 85,71 \\
-P06 & direto  & 28,0 & 1,572 & 97,39 \\
-P06 & reverso & 28,0 & 1,537 & 95,31 \\
+P01 & direto  & 27,5 & 1,471 & 91,94 & 106,64 \\
+P01 & reverso & 28,0 & 1,434 & 88,89 & 103,22 \\
+P02 & direto  & 40,0 & 1,702 & 85,11 & 102,13 \\
+P02 & reverso & 38,3 & 1,673 & 86,37 & 103,11 \\
+P03 & direto  & 36,5 & 1,603 & 85,35 & 101,38 \\
+P03 & reverso & 34,6 & 1,487 & 82,24 & 97,11 \\
+P04 & direto  & 32,0 & 1,564 & 90,69 & 106,33 \\
+P04 & reverso & 32,9 & 1,528 & 87,35 & 102,63 \\
+P05 & direto  & 37,3 & 1,557 & 81,94 & 97,52 \\
+P05 & reverso & 36,5 & 1,604 & 85,71 & 101,76 \\
+P06 & direto  & 28,0 & 1,572 & 97,39 & 113,11 \\
+P06 & reverso & 28,0 & 1,537 & 95,31 & 110,67 \\
 \bottomrule
 \end{tabular}
 \end{table}
