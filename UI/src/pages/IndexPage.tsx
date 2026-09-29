@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
 import { ConnectBar } from "../components/ConnectBar";
+import { LitelMark } from "../components/LitelMark";
 import { useBench } from "../context/BenchContext";
 import copasa from "../assets/copasa.png";
 import logo from "../assets/logo.png";
@@ -42,6 +43,8 @@ export function IndexPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <LitelMark size={30} />
+            <span className="h-10 w-px bg-border" />
             <img
               src={ufjf}
               alt="UFJF"
