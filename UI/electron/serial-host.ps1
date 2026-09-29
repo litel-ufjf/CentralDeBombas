@@ -57,7 +57,7 @@ Start-Sleep -Milliseconds 250
 
 $stdInStream = [Console]::OpenStandardInput()
 $asyncRead = $null
-$byteBuf = New-Object byte[] 1
+$byteBuf = New-Object byte[] 4096
 $cmdBuf = New-Object System.Text.StringBuilder
 $lineBuf = New-Object System.Text.StringBuilder
 
@@ -87,33 +87,53 @@ try {
 
     if ($null -eq $asyncRead) {
       try {
-        $asyncRead = $stdInStream.BeginRead($byteBuf, 0, 1, $null, $null)
+        $asyncRead = $stdInStream.BeginRead($byteBuf, 0, $byteBuf.Length, $null, $null)
       } catch {
         $asyncRead = $null
       }
     }
-    if ($asyncRead -and $asyncRead.IsCompleted) {
+    $closing = $false
+    while ($asyncRead -and $asyncRead.IsCompleted) {
       try {
         $n = $stdInStream.EndRead($asyncRead)
       } catch {
         $n = -1
       }
       $asyncRead = $null
-      if ($n -gt 0) {
-        $ch = [char]$byteBuf[0]
+      if ($n -le 0) {
+        break
+      }
+      $outgoing = New-Object System.Text.StringBuilder
+      for ($i = 0; $i -lt $n; $i++) {
+        $ch = [char]$byteBuf[$i]
         if ($ch -eq [char]10) {
           $cmd = $cmdBuf.ToString().TrimEnd([char]13)
           $cmdBuf.Clear() | Out-Null
           if ($cmd -eq "__CLOSE__") {
+            $closing = $true
             break
           }
-          if ($cmd.Length -gt 0 -and $port.IsOpen) {
-            try { $port.Write($cmd + "`n") } catch {}
+          if ($cmd.Length -gt 0) {
+            [void]$outgoing.Append($cmd).Append("`n")
           }
         } else {
           [void]$cmdBuf.Append($ch)
         }
       }
+      if ($outgoing.Length -gt 0 -and $port.IsOpen) {
+        try { $port.Write($outgoing.ToString()) } catch {}
+      }
+      if ($closing) {
+        break
+      }
+      try {
+        $asyncRead = $stdInStream.BeginRead($byteBuf, 0, $byteBuf.Length, $null, $null)
+      } catch {
+        $asyncRead = $null
+      }
+    }
+    if ($closing) {
+      break
     }
 
     try {
