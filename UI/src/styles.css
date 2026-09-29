@@ -158,3 +158,8 @@ body {
 .field-light:disabled {
   opacity: 0.5;
 }
+
+.bk-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cdcdcd transparent;
+}

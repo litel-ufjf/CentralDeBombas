@@ -61,7 +61,7 @@ export const PALETTE: { title: string; category: BlockCategory; items: PaletteIt
     ],
   },
   {
-    title: "Variáveis E/S",
+    title: "Variáveis/E/S",
     category: "io",
     items: [
       { kind: "varFlow", category: "io", label: "Vazão Atual" },
@@ -72,17 +72,10 @@ export const PALETTE: { title: string; category: BlockCategory; items: PaletteIt
 ];
 
 export const CATEGORY_COLOR: Record<BlockCategory, string> = {
-  logic: "#3d8c4a",
-  action: "#2f9e44",
-  profile: "#3cb25a",
-  io: "#dc2626",
-};
-
-export const PALETTE_INK: Record<BlockCategory, string> = {
-  logic: "#2563eb",
-  action: "#16a34a",
-  profile: "#d97706",
-  io: "#dc2626",
+  logic: "#3879b5",
+  action: "#4e9c51",
+  profile: "#df811d",
+  io: "#b9504d",
 };
 
 const KIND_META: Record<
@@ -160,6 +153,26 @@ export function findBlock(
   return null;
 }
 
+export function locateBlock(
+  blocks: ExperimentBlock[],
+  id: string,
+  parentId: string | null = null,
+): { parentId: string | null; index: number } | null {
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (block.id === id) {
+      return { parentId, index };
+    }
+    if (block.children) {
+      const nested = locateBlock(block.children, id, block.id);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
 export function containsId(block: ExperimentBlock, id: string): boolean {
   if (block.id === id) {
     return true;
@@ -226,6 +239,7 @@ export function moveBlock(
   parentId: string | null,
   index: number,
 ): ExperimentBlock[] {
+  const origin = locateBlock(blocks, id);
   const pulled = removeBlock(blocks, id);
   if (!pulled.removed) {
     return blocks;
@@ -233,7 +247,9 @@ export function moveBlock(
   if (parentId && containsId(pulled.removed, parentId)) {
     return blocks;
   }
-  return insertBlock(pulled.next, parentId, index, pulled.removed);
+  const at =
+    origin && origin.parentId === parentId && origin.index < index ? index - 1 : index;
+  return insertBlock(pulled.next, parentId, at, pulled.removed);
 }
 
 export function setField(
