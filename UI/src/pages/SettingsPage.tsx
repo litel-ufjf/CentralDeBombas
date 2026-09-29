@@ -10,8 +10,39 @@ import {
   manualPickFor,
   resolveCalibration,
   type CalibrationPolicy,
+  type ConfirmationPreferences,
   type DisplayPreferences,
 } from "../lib/preferences";
+
+const CONFIRM_OPTIONS: { key: keyof ConfirmationPreferences; label: string; hint: string }[] = [
+  {
+    key: "pauseProgram",
+    label: "Pausar programação",
+    hint: "Pergunta antes de pausar um programa em execução.",
+  },
+  {
+    key: "stopProgram",
+    label: "Parar programação",
+    hint: "Pergunta antes de parar um programa ou cancelar um agendamento.",
+  },
+];
+
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span
+      className={`mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 ring-1 ${
+        on ? "bg-run/20 ring-run/40" : "bg-foreground/5 ring-border"
+      }`}
+      aria-hidden
+    >
+      <span
+        className={`size-4 rounded-full transition-transform ${
+          on ? "translate-x-4 bg-run" : "bg-faint"
+        }`}
+      />
+    </span>
+  );
+}
 
 const DISPLAY_OPTIONS: { key: keyof DisplayPreferences; label: string; hint: string }[] = [
   {
@@ -71,6 +102,7 @@ export function SettingsPage() {
     setCalibrationPolicy,
     setManualCalibration,
     setDisplayPreference,
+    setConfirmation,
   } = useBench();
 
   return (
@@ -119,19 +151,43 @@ export function SettingsPage() {
                         {item.hint}
                       </span>
                     </span>
-                    <span
-                      className={`mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 ring-1 ${
-                        on ? "bg-run/20 ring-run/40" : "bg-foreground/5 ring-border"
-                      }`}
-                      aria-hidden
-                    >
-                      <span
-                        className={`size-4 rounded-full transition-transform ${
-                          on ? "translate-x-4 bg-run" : "bg-faint"
-                        }`}
-                      />
-                    </span>
+                    <Switch on={on} />
                     <span className="sr-only">{on ? "Visível" : "Oculto"}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <div className="mt-10">
+          <p className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+            Confirmações
+          </p>
+          <p className="mt-2 text-[12px] text-muted-foreground">
+            Reative aqui as perguntas marcadas com “Não exibir esta mensagem
+            novamente”.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {CONFIRM_OPTIONS.map((item) => {
+              const on = preferences.confirmations[item.key];
+              return (
+                <li key={item.key}>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmation(item.key, !on)}
+                    className="flex w-full items-start justify-between gap-3 rounded-[14px] bg-foreground/4 px-3 py-3 text-left ring-1 ring-border"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-medium">
+                        {item.label}
+                      </span>
+                      <span className="mt-0.5 block text-[12px] text-muted-foreground">
+                        {item.hint}
+                      </span>
+                    </span>
+                    <Switch on={on} />
+                    <span className="sr-only">{on ? "Perguntar" : "Não perguntar"}</span>
                   </button>
                 </li>
               );

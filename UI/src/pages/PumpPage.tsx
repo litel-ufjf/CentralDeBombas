@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
 import { CalibrationTabs } from "../components/CalibrationTabs";
 import { ConnectBar } from "../components/ConnectBar";
 import { ExperimentModal } from "../components/ExperimentModal";
+import { ProgramControls } from "../components/ProgramControls";
 import { PumpMonitor } from "../components/PumpMonitor";
 import { useBench } from "../context/BenchContext";
 import {
@@ -11,6 +12,8 @@ import {
   type PumpDirection,
 } from "../lib/calibration";
 import { sourceLabel } from "../lib/preferences";
+import { isOwnedState } from "../lib/protocol";
+import { loadProgram } from "../lib/storage";
 
 export function PumpPage() {
   const { id } = useParams({ from: "/bomba/$id" });
@@ -33,10 +36,17 @@ export function PumpPage() {
     removeChart,
     resetTelemetry,
     preferences,
+    programs,
   } = useBench();
   const [experimentOpen, setExperimentOpen] = useState(false);
   const pump = pumps.find((item) => item.id === Number(id));
   const maxFlow = pump ? maxFlowFromCalibration(pump.calibration) : 0;
+  const savedProgram = useMemo(
+    () => (experimentOpen ? [] : loadProgram(Number(id))),
+    [experimentOpen, id],
+  );
+  const programmed = pump ? isOwnedState(programs[pump.id - 1].state) : false;
+  const manual = connected && !programmed;
 
   if (!pump) {
     return (
@@ -124,7 +134,7 @@ export function PumpPage() {
             max={Math.max(1, maxFlow)}
             step={0.5}
             value={Math.min(maxFlow, pump.speed)}
-            disabled={!connected}
+            disabled={!manual}
             aria-label="Velocidade estimada da bomba"
             onChange={(event) => setFlow(pump.id, Number(event.target.value))}
             className="slider-run"
@@ -154,7 +164,7 @@ export function PumpPage() {
             max={100}
             step={0.1}
             value={pump.pwm}
-            disabled={!connected}
+            disabled={!manual}
             aria-label="PWM da bomba"
             onChange={(event) => setPwm(pump.id, Number(event.target.value))}
             className="slider-run slider-flow"
@@ -179,7 +189,7 @@ export function PumpPage() {
               return (
                 <button
                   key={direction}
-                  disabled={!connected}
+                  disabled={!manual}
                   onClick={() => setDirection(pump.id, direction)}
                   className={`flex-1 rounded-[9px] py-2 text-[12px] leading-none font-medium disabled:opacity-40 ${
                     selected
@@ -196,7 +206,7 @@ export function PumpPage() {
 
         <button
           onClick={() => toggleRunning(pump.id)}
-          disabled={!connected}
+          disabled={!manual}
           className={`mt-6 w-full rounded-[14px] py-3.5 text-[13px] leading-none font-semibold ring-1 disabled:opacity-40 ${
             pump.running
               ? "bg-run/90 text-run-foreground ring-run"
@@ -214,6 +224,25 @@ export function PumpPage() {
           >
             Programar experimento
           </button>
+        ) : null}
+
+        {preferences.display.experiment || programmed ? (
+          <div className="mt-3 rounded-[14px] bg-foreground/4 p-3 ring-1 ring-border">
+            <p className="mb-2 text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+              Programação
+            </p>
+            <ProgramControls
+              pumpId={pump.id}
+              pumpName={pump.name}
+              blocks={savedProgram}
+              layout="card"
+            />
+            {programmed ? (
+              <p className="mt-2 text-[11.5px] text-faint">
+                Controles manuais bloqueados enquanto a programação estiver ativa.
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         {preferences.display.calibrateRun ||

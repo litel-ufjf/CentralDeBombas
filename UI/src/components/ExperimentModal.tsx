@@ -39,6 +39,7 @@ import {
 } from "../lib/experiment";
 import { loadProgram, saveProgram } from "../lib/storage";
 import { LitelMark } from "./LitelMark";
+import { ProgramControls } from "./ProgramControls";
 
 const BLOCK_FONT = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
 const IO_MIME = "application/x-bomba-io";
@@ -321,7 +322,7 @@ function profileSeries(kind: "ramp" | "sine" | "step", fields: Record<string, Fi
     if (kind === "sine") {
       return center + amplitude * Math.sin(t * Math.PI * 2);
     }
-    return t < 0.3 ? from : to;
+    return t < 0.5 ? from : to;
   });
 }
 
@@ -1060,6 +1061,16 @@ export function ExperimentModal({
             </div>
           </div>
         </div>
+
+        <footer className="border-t border-[#e2e8ef] bg-white/70 px-6 py-2.5">
+          <ProgramControls
+            pumpId={pumpId}
+            pumpName={pumpName}
+            blocks={blocks}
+            onBeforeRun={() => saveProgram(pumpId, blocksRef.current)}
+            layout="bar"
+          />
+        </footer>
       </div>
     </div>
   );

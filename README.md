@@ -10,18 +10,30 @@ Há um [guia do usuário em PDF](documentos/guia_usuario.pdf) na pasta `document
 
 1. Abra a [página de releases](https://github.com/Jakson-Almeida/Bomba/releases/latest) e baixe o instalador **Painel de Bombas** para Windows.
 2. Instale e abra o app.
-3. Grave no ESP32 o sketch **Arduino/interface** (L298N) ou **Arduino/interface_TB** (TB6612FNG), só na primeira vez ou quando o firmware mudar.
+3. Grave no ESP32 o sketch **Arduino/interface_prog** (TB6612FNG, com programação de experimentos), **Arduino/interface_TB** (TB6612FNG, só controle manual) ou **Arduino/interface** (L298N), só na primeira vez ou quando o firmware mudar.
 4. Ligue a placa no PC pelo USB, escolha a porta COM e clique em **Conectar**.
 
 Pronto: ligue, ajuste PWM, sentido e velocidade pelo painel.
 
 Enquanto o cabo estiver desconectado, os valores na tela ficam em zero. Cada bomba tem uma página própria (**Abrir**), com calibração da vazão estimada: zero abaixo do limiar PWM₀ e `Q = a × (PWM − PWM₀)` acima dele, já que ainda não há sensor de fluxo.
 
+### Programação de experimentos
+
+Com o firmware **interface_prog**, o editor de blocos (**Programar experimento**) envia o programa para a placa, que o executa sozinha. No rodapé do editor, ou no cartão **Programação** da página da bomba, escolha **Agora** ou **Agendar** (data e hora) e acompanhe o andamento; **Pausar** e **Parar** pedem confirmação, que pode ser desligada na própria caixa e reativada em **Configurações**.
+
+- Ao conectar, o app acerta o relógio da placa com o do computador e repete isso a cada minuto; o agendamento usa esse relógio.
+- O programa continua se o app fechar ou o cabo for desconectado (só as bombas manuais são desligadas). **Parar tudo** interrompe inclusive os programas.
+- Enquanto um programa está ativo, os controles manuais daquela bomba ficam bloqueados.
+- O programa fica na memória RAM da placa: se ela reiniciar, é preciso enviá-lo de novo.
+
+O protocolo serial (115200 baud, uma linha por comando) está descrito no início de `Arduino/interface_prog/interface_prog.ino`. Sem placa, `node scripts/programacao/testar_ui_simulada.mjs` testa o fluxo da UI com uma placa simulada (com `npm run dev` rodando).
+
 ## Como o projeto está organizado
 
 - **Arduino/** — programas da placa
   - **interface/** — o programa diário com a ponte L298N.
   - **interface_TB/** — o mesmo protocolo serial, para a ponte TB6612FNG.
+  - **interface_prog/** — o interface_TB com relógio sincronizado e execução autônoma de programas (imediata ou agendada, com pausa e parada).
   - **motor/**, **motor_teste/**, **2_motores/** e **2_motores_TB/** — testes de montagem e debug.
 - **UI/** — código do aplicativo de computador.
 - **exemplo/** — cópia de referência do visual; não entra no Git e não é o programa que se usa.

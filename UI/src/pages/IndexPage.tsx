@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
 import { ConnectBar } from "../components/ConnectBar";
 import { LitelMark } from "../components/LitelMark";
+import { ProgramBadge } from "../components/ProgramControls";
 import { useBench } from "../context/BenchContext";
 import copasa from "../assets/copasa.png";
 import logo from "../assets/logo.png";
@@ -16,6 +17,7 @@ export function IndexPage() {
     setGlobalPwm,
     stopAll,
     preferences,
+    programs,
   } = useBench();
   const activeCount = pumps.filter((pump) => pump.running).length;
 
@@ -121,8 +123,11 @@ export function IndexPage() {
             className="rounded-[16px] bg-panel-2/80 p-3.5 ring-1 ring-border backdrop-blur-md active:ring-run/40"
           >
             <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] tracking-widest text-faint">
-                {pump.name}
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[11px] tracking-widest text-faint">
+                  {pump.name}
+                </span>
+                <ProgramBadge status={programs[pump.id - 1]} />
               </span>
               <span
                 className={

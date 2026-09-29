@@ -27,7 +27,18 @@ import {
   type PumpDirection,
   type PumpSetpoint,
 } from "../lib/calibration";
-import { commands, createEmptyState, parseLine } from "../lib/protocol";
+import {
+  commands,
+  createEmptyState,
+  emptyProgramStatus,
+  errorText,
+  isOwnedState,
+  parseLine,
+  type ProgramState,
+  type ProgramStatus,
+} from "../lib/protocol";
+import { compileProgram, programLines } from "../lib/programCompiler";
+import type { ExperimentBlock } from "../lib/experiment";
 import { SerialClient, listSerialPorts, serialSupported, type ComPort } from "../lib/serial";
 import {
   loadCalibrations,
@@ -41,6 +52,7 @@ import {
   resolveCalibration,
   sanitizePreferences,
   withManualPick,
+  type ConfirmationPreferences,
   type DisplayPreferences,
   type Preferences,
   type ResolvedCalibration,
@@ -64,6 +76,20 @@ type PumpTelemetry = {
   volume: number;
   lastT: number;
   samples: TelemetrySample[];
+};
+
+const CLOCK_SYNC_MS = 60000;
+const PROGRAM_ACK_MS = 5000;
+
+function emptyPrograms(): ProgramStatus[] {
+  return Array.from({ length: MOTOR_COUNT }, emptyProgramStatus);
+}
+
+type ReportWaiter = {
+  id: number;
+  accept: ProgramState[];
+  resolve: (status: ProgramStatus) => void;
+  reject: (error: Error) => void;
 };
 
 function emptyTelemetry(): PumpTelemetry[] {
@@ -106,6 +132,16 @@ type BenchContextValue = {
     recordId: string,
   ) => void;
   setDisplayPreference: (key: keyof DisplayPreferences, value: boolean) => void;
+  setConfirmation: (key: keyof ConfirmationPreferences, value: boolean) => void;
+  programSupport: boolean;
+  clockSynced: boolean;
+  programs: ProgramStatus[];
+  programEstimates: (number | null)[];
+  programOwns: (id: number) => boolean;
+  runProgram: (id: number, blocks: ExperimentBlock[], startAt: number | null) => Promise<void>;
+  pauseProgram: (id: number) => void;
+  resumeProgram: (id: number) => void;
+  stopProgram: (id: number) => void;
   setFlow: (id: number, flow: number) => void;
   setGlobalPwm: (pwm: number) => void;
   applyGlobalPwm: (pwm: number) => void;
@@ -174,6 +210,12 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   );
   const [globalPwm, setGlobalPwmState] = useState(0);
   const [knownPorts, setKnownPorts] = useState<ComPort[]>([]);
+  const [programSupport, setProgramSupport] = useState(false);
+  const [clockSynced, setClockSynced] = useState(false);
+  const [programs, setPrograms] = useState(emptyPrograms);
+  const [programEstimates, setProgramEstimates] = useState<(number | null)[]>(() =>
+    Array.from({ length: MOTOR_COUNT }, () => null),
+  );
 
   const sampleRef = useRef({
     connected: false,
@@ -194,6 +236,22 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   const pwmTimers = useRef<Record<number, number>>({});
   const heartbeatRef = useRef<number | null>(null);
   const helloWaitRef = useRef<((ok: boolean) => void) | null>(null);
+  const programSupportRef = useRef(false);
+  const programsRef = useRef(programs);
+  programsRef.current = programs;
+  const lastClockSyncRef = useRef(0);
+  const reportWaitersRef = useRef(new Set<ReportWaiter>());
+
+  const programOwns = useCallback(
+    (id: number) => isOwnedState(programsRef.current[id - 1]?.state ?? "empty"),
+    [],
+  );
+
+  const rejectWaiters = useCallback((error: Error) => {
+    const waiters = [...reportWaitersRef.current];
+    reportWaitersRef.current.clear();
+    waiters.forEach((waiter) => waiter.reject(error));
+  }, []);
 
   const send = useCallback(async (line: string) => {
     if (!clientRef.current?.connected) {
@@ -223,25 +281,32 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       pwmTimers.current = {};
       helloWaitRef.current?.(false);
       helloWaitRef.current = null;
+      rejectWaiters(new Error("Arduino desconectado."));
       const client = clientRef.current;
       clientRef.current = null;
       if (client) {
         try {
-          await client.write(commands.stopAll());
+          await client.write(
+            programSupportRef.current ? commands.stopManual() : commands.stopAll(),
+          );
         } catch {
           /* porta já pode ter caído */
         }
         await client.disconnect();
       }
+      programSupportRef.current = false;
       setConnected(false);
       setConnecting(false);
       setSetpoints(createDefaultSetpoints());
       setGlobalPwmState(0);
+      setProgramSupport(false);
+      setClockSynced(false);
+      setPrograms(emptyPrograms());
       if (reason) {
         setError(reason);
       }
     },
-    [clearHeartbeat],
+    [clearHeartbeat, rejectWaiters],
   );
 
   const refreshPorts = useCallback(async () => {
@@ -266,12 +331,33 @@ export function BenchProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (line.kind === "hello") {
+            programSupportRef.current = line.programs;
             helloWaitRef.current?.(true);
             helloWaitRef.current = null;
             return;
           }
           if (line.kind === "error") {
-            setError(line.message);
+            if (reportWaitersRef.current.size > 0) {
+              rejectWaiters(new Error(line.message));
+            } else {
+              setError(line.message);
+            }
+            return;
+          }
+          if (line.kind === "clock") {
+            setClockSynced(line.epochMs > 0);
+            return;
+          }
+          if (line.kind === "report") {
+            setPrograms((current) =>
+              current.map((item, index) => (index === line.id - 1 ? line.status : item)),
+            );
+            reportWaitersRef.current.forEach((waiter) => {
+              if (waiter.id === line.id && waiter.accept.includes(line.status.state)) {
+                reportWaitersRef.current.delete(waiter);
+                waiter.resolve(line.status);
+              }
+            });
             return;
           }
           if (line.kind === "state" && connectedRef.current) {
@@ -302,8 +388,20 @@ export function BenchProvider({ children }: { children: ReactNode }) {
 
         connectedRef.current = true;
         setConnected(true);
+        setProgramSupport(programSupportRef.current);
+        if (programSupportRef.current) {
+          lastClockSyncRef.current = Date.now();
+          await client.write(commands.time(Date.now()));
+        }
         await client.write(commands.get());
         heartbeatRef.current = window.setInterval(() => {
+          if (
+            programSupportRef.current &&
+            Date.now() - lastClockSyncRef.current >= CLOCK_SYNC_MS
+          ) {
+            lastClockSyncRef.current = Date.now();
+            void send(commands.time(Date.now()));
+          }
           void send(commands.get());
         }, 1500);
         await refreshPorts();
@@ -319,7 +417,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         setConnecting(false);
       }
     },
-    [dropConnection, refreshPorts, send],
+    [dropConnection, refreshPorts, rejectWaiters, send],
   );
 
   const disconnect = useCallback(async () => {
@@ -343,6 +441,9 @@ export function BenchProvider({ children }: { children: ReactNode }) {
 
   const setPwm = useCallback(
     (id: number, pwm: number) => {
+      if (programOwns(id)) {
+        return;
+      }
       const next = clampPwm(pwm);
       setSetpoints((current) =>
         current.map((pump, index) =>
@@ -351,11 +452,14 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       );
       queuePwm(id, next);
     },
-    [queuePwm],
+    [programOwns, queuePwm],
   );
 
   const setDirection = useCallback(
     (id: number, direction: PumpDirection) => {
+      if (programOwns(id)) {
+        return;
+      }
       setSetpoints((current) =>
         current.map((pump, index) =>
           index === id - 1 ? { ...pump, direction } : pump,
@@ -363,11 +467,14 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       );
       void send(commands.direction(id, direction));
     },
-    [send],
+    [programOwns, send],
   );
 
   const setEnabled = useCallback(
     (id: number, enabled: boolean) => {
+      if (programOwns(id)) {
+        return;
+      }
       setSetpoints((current) =>
         current.map((pump, index) =>
           index === id - 1 ? { ...pump, enabled } : pump,
@@ -375,13 +482,13 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       );
       void send(commands.enable(id, enabled));
     },
-    [send],
+    [programOwns, send],
   );
 
   const toggleRunning = useCallback(
     (id: number) => {
       const current = setpoints[id - 1];
-      if (!current) {
+      if (!current || programOwns(id)) {
         return;
       }
       const enabled = !current.enabled;
@@ -402,7 +509,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       }
       void send(commands.enable(id, enabled));
     },
-    [calibrations, preferences, send, setpoints],
+    [calibrations, preferences, programOwns, send, setpoints],
   );
 
   const persistCalibrations = useCallback((next: PumpCalibrationSet[]) => {
@@ -494,6 +601,18 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         persistPreferences({
           ...current,
           display: { ...current.display, [key]: value },
+        }),
+      );
+    },
+    [persistPreferences],
+  );
+
+  const setConfirmation = useCallback(
+    (key: keyof ConfirmationPreferences, value: boolean) => {
+      setPreferencesState((current) =>
+        persistPreferences({
+          ...current,
+          confirmations: { ...current.confirmations, [key]: value },
         }),
       );
     },
@@ -592,20 +711,27 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       const next = clampPwm(pwm);
       setGlobalPwmState(next);
       setSetpoints((current) =>
-        current.map((pump) => ({
-          ...pump,
-          pwm: next,
-          enabled: next > 0 || pump.enabled,
-        })),
+        current.map((pump, index) =>
+          programOwns(index + 1)
+            ? pump
+            : {
+                ...pump,
+                pwm: next,
+                enabled: next > 0 || pump.enabled,
+              },
+        ),
       );
       for (let id = 1; id <= MOTOR_COUNT; id++) {
+        if (programOwns(id)) {
+          continue;
+        }
         void send(commands.pwm(id, next));
         if (next > 0) {
           void send(commands.enable(id, true));
         }
       }
     },
-    [send],
+    [programOwns, send],
   );
 
   const stopAll = useCallback(() => {
@@ -615,6 +741,92 @@ export function BenchProvider({ children }: { children: ReactNode }) {
     setGlobalPwmState(0);
     void send(commands.stopAll());
   }, [send]);
+
+  const waitForProgram = useCallback(
+    (id: number, accept: ProgramState[]) =>
+      new Promise<ProgramStatus>((resolve, reject) => {
+        const waiter: ReportWaiter = {
+          id,
+          accept,
+          resolve: (status) => {
+            window.clearTimeout(timer);
+            resolve(status);
+          },
+          reject: (reason) => {
+            window.clearTimeout(timer);
+            reject(reason);
+          },
+        };
+        const timer = window.setTimeout(() => {
+          reportWaitersRef.current.delete(waiter);
+          reject(new Error("A placa não confirmou o programa. Confira a conexão e envie novamente."));
+        }, PROGRAM_ACK_MS);
+        reportWaitersRef.current.add(waiter);
+      }),
+    [],
+  );
+
+  const runProgram = useCallback(
+    async (id: number, blocks: ExperimentBlock[], startAt: number | null) => {
+      const client = clientRef.current;
+      if (!client?.connected || !connectedRef.current) {
+        throw new Error("Conecte o Arduino para executar o programa.");
+      }
+      if (!programSupportRef.current) {
+        throw new Error(
+          "O firmware da placa não aceita programas. Grave o sketch Arduino/interface_prog.",
+        );
+      }
+      if (programOwns(id)) {
+        throw new Error("Já há um programa ativo nesta bomba. Pare-o antes de enviar outro.");
+      }
+      if (startAt !== null && startAt <= Date.now()) {
+        throw new Error("Escolha um horário no futuro para agendar.");
+      }
+      const program = compileProgram(blocks);
+      const set = calibrations[id - 1];
+      const forward = resolveCalibration(set, "forward", preferences, id).calibration;
+      const reverse = resolveCalibration(set, "reverse", preferences, id).calibration;
+      const lines = programLines(id, program, forward, reverse, startAt);
+
+      lastClockSyncRef.current = Date.now();
+      await client.write(commands.time(Date.now()));
+      const accepted = waitForProgram(id, ["waiting", "running"]);
+      try {
+        for (const line of lines) {
+          await client.write(line);
+        }
+      } catch (caught) {
+        rejectWaiters(caught instanceof Error ? caught : new Error("Falha ao enviar."));
+      }
+      await accepted;
+      setProgramEstimates((current) =>
+        current.map((item, index) => (index === id - 1 ? program.estimatedSeconds : item)),
+      );
+    },
+    [calibrations, preferences, programOwns, rejectWaiters, waitForProgram],
+  );
+
+  const pauseProgram = useCallback(
+    (id: number) => {
+      void send(commands.programPause(id, true));
+    },
+    [send],
+  );
+
+  const resumeProgram = useCallback(
+    (id: number) => {
+      void send(commands.programPause(id, false));
+    },
+    [send],
+  );
+
+  const stopProgram = useCallback(
+    (id: number) => {
+      void send(commands.programStop(id));
+    },
+    [send],
+  );
 
   useEffect(() => {
     void refreshPorts();
@@ -694,6 +906,16 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       setCalibrationPolicy,
       setManualCalibration,
       setDisplayPreference,
+      setConfirmation,
+      programSupport: connected && programSupport,
+      clockSynced: connected && clockSynced,
+      programs,
+      programEstimates,
+      programOwns,
+      runProgram,
+      pauseProgram,
+      resumeProgram,
+      stopProgram,
       setFlow,
       setGlobalPwm,
       applyGlobalPwm,
@@ -714,6 +936,16 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       preferences,
       setCalibrationPolicy,
       setDisplayPreference,
+      setConfirmation,
+      programSupport,
+      clockSynced,
+      programs,
+      programEstimates,
+      programOwns,
+      runProgram,
+      pauseProgram,
+      resumeProgram,
+      stopProgram,
       setManualCalibration,
       chartsFor,
       connectTo,

@@ -26,10 +26,16 @@ export type DisplayPreferences = {
   charts: boolean;
 };
 
+export type ConfirmationPreferences = {
+  pauseProgram: boolean;
+  stopProgram: boolean;
+};
+
 export type Preferences = {
   calibrationPolicy: CalibrationPolicy;
   manualPicks: Record<string, ManualPick>;
   display: DisplayPreferences;
+  confirmations: ConfirmationPreferences;
 };
 
 export type CalibrationSource =
@@ -54,10 +60,16 @@ export const DEFAULT_DISPLAY: DisplayPreferences = {
   charts: true,
 };
 
+export const DEFAULT_CONFIRMATIONS: ConfirmationPreferences = {
+  pauseProgram: true,
+  stopProgram: true,
+};
+
 export const DEFAULT_PREFERENCES: Preferences = {
   calibrationPolicy: "latest",
   manualPicks: {},
   display: { ...DEFAULT_DISPLAY },
+  confirmations: { ...DEFAULT_CONFIRMATIONS },
 };
 
 export function sanitizePreferences(value: unknown): Preferences {
@@ -76,7 +88,12 @@ export function sanitizePreferences(value: unknown): Preferences {
     };
   }
   const display = raw.display ?? DEFAULT_DISPLAY;
+  const confirmations = raw.confirmations ?? DEFAULT_CONFIRMATIONS;
   return {
+    confirmations: {
+      pauseProgram: confirmations.pauseProgram !== false,
+      stopProgram: confirmations.stopProgram !== false,
+    },
     calibrationPolicy: policy,
     manualPicks: picks,
     display: {
