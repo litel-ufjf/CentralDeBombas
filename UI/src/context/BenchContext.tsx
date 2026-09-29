@@ -52,8 +52,10 @@ import {
   resolveCalibration,
   sanitizePreferences,
   withManualPick,
+  initialVolumeFor,
   type ConfirmationPreferences,
   type DisplayPreferences,
+  type FlowSignMode,
   type Preferences,
   type ResolvedCalibration,
 } from "../lib/preferences";
@@ -71,11 +73,19 @@ export type DisplayPump = {
   calibrationChoice: ResolvedCalibration;
 };
 
+type RawSample = {
+  t: number;
+  flow: number;
+  signedVolume: number;
+  absoluteVolume: number;
+};
+
 type PumpTelemetry = {
   monitoring: boolean;
-  volume: number;
+  signedVolume: number;
+  absoluteVolume: number;
   lastT: number;
-  samples: TelemetrySample[];
+  samples: RawSample[];
 };
 
 const CLOCK_SYNC_MS = 60000;
@@ -95,7 +105,8 @@ type ReportWaiter = {
 function emptyTelemetry(): PumpTelemetry[] {
   return Array.from({ length: MOTOR_COUNT }, () => ({
     monitoring: false,
-    volume: 0,
+    signedVolume: 0,
+    absoluteVolume: 0,
     lastT: 0,
     samples: [],
   }));
@@ -133,6 +144,8 @@ type BenchContextValue = {
   ) => void;
   setDisplayPreference: (key: keyof DisplayPreferences, value: boolean) => void;
   setConfirmation: (key: keyof ConfirmationPreferences, value: boolean) => void;
+  setFlowSign: (mode: FlowSignMode) => void;
+  setInitialVolume: (id: number, volume: number) => void;
   programSupport: boolean;
   clockSynced: boolean;
   programs: ProgramStatus[];
@@ -200,12 +213,13 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   const [calibrations, setCalibrations] = useState(loadCalibrations);
   const [preferences, setPreferencesState] = useState(loadPreferences);
   const [charts, setCharts] = useState(loadChartLayouts);
-  const [telemetry, setTelemetry] = useState(() =>
+  const [telemetry, setTelemetry] = useState<PumpTelemetry[]>(() =>
     loadChartLayouts().map((list) => ({
       monitoring: list.length > 0,
-      volume: 0,
+      signedVolume: 0,
+      absoluteVolume: 0,
       lastT: 0,
-      samples: [] as TelemetrySample[],
+      samples: [],
     })),
   );
   const [globalPwm, setGlobalPwmState] = useState(0);
@@ -607,6 +621,36 @@ export function BenchProvider({ children }: { children: ReactNode }) {
     [persistPreferences],
   );
 
+  const setFlowSign = useCallback(
+    (mode: FlowSignMode) => {
+      setPreferencesState((current) =>
+        persistPreferences({
+          ...current,
+          telemetry: { ...current.telemetry, flowSign: mode },
+        }),
+      );
+    },
+    [persistPreferences],
+  );
+
+  const setInitialVolume = useCallback(
+    (id: number, volume: number) => {
+      setPreferencesState((current) =>
+        persistPreferences({
+          ...current,
+          telemetry: {
+            ...current.telemetry,
+            initialVolumes: {
+              ...current.telemetry.initialVolumes,
+              [String(id)]: Number.isFinite(volume) ? volume : 0,
+            },
+          },
+        }),
+      );
+    },
+    [persistPreferences],
+  );
+
   const setConfirmation = useCallback(
     (key: keyof ConfirmationPreferences, value: boolean) => {
       setPreferencesState((current) =>
@@ -665,20 +709,37 @@ export function BenchProvider({ children }: { children: ReactNode }) {
     setTelemetry((current) =>
       current.map((item, index) =>
         index === id - 1
-          ? { ...item, volume: 0, lastT: 0, samples: [] }
+          ? { ...item, signedVolume: 0, absoluteVolume: 0, lastT: 0, samples: [] }
           : item,
       ),
     );
   }, []);
 
+  const telemetryView = useMemo(() => {
+    const signed = preferences.telemetry.flowSign === "signed";
+    return telemetry.map((item, index) => {
+      const initial = initialVolumeFor(preferences, index + 1);
+      return {
+        volume: initial + (signed ? item.signedVolume : item.absoluteVolume),
+        samples: item.samples.map(
+          (sample): TelemetrySample => ({
+            t: sample.t,
+            flow: signed ? sample.flow : Math.abs(sample.flow),
+            volume: initial + (signed ? sample.signedVolume : sample.absoluteVolume),
+          }),
+        ),
+      };
+    });
+  }, [preferences, telemetry]);
+
   const chartsFor = useCallback((id: number) => charts[id - 1] ?? [], [charts]);
   const samplesFor = useCallback(
-    (id: number) => telemetry[id - 1]?.samples ?? [],
-    [telemetry],
+    (id: number) => telemetryView[id - 1]?.samples ?? [],
+    [telemetryView],
   );
   const volumeFor = useCallback(
-    (id: number) => telemetry[id - 1]?.volume ?? 0,
-    [telemetry],
+    (id: number) => telemetryView[id - 1]?.volume ?? 0,
+    [telemetryView],
   );
   const monitoringFor = useCallback(
     (id: number) => telemetry[id - 1]?.monitoring ?? false,
@@ -851,16 +912,18 @@ export function BenchProvider({ children }: { children: ReactNode }) {
             snapshot.preferences,
             index + 1,
           ).calibration;
-          const flow = running
+          const magnitude = running
             ? Math.max(0, flowFromPwm(setpoint.pwm, calibration))
             : 0;
+          const flow = setpoint.direction === "reverse" ? -magnitude : magnitude;
           const dt = item.lastT > 0 ? Math.min(1000, now - item.lastT) : 0;
-          const volume = item.volume + flow * (dt / 60000);
+          const signedVolume = item.signedVolume + flow * (dt / 60000);
+          const absoluteVolume = item.absoluteVolume + magnitude * (dt / 60000);
           const samples = [
             ...item.samples,
-            { t: now, flow, volume },
+            { t: now, flow, signedVolume, absoluteVolume },
           ].slice(-7200);
-          return { ...item, lastT: now, volume, samples };
+          return { ...item, lastT: now, signedVolume, absoluteVolume, samples };
         });
         return changed ? next : current;
       });
@@ -907,6 +970,8 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       setManualCalibration,
       setDisplayPreference,
       setConfirmation,
+      setFlowSign,
+      setInitialVolume,
       programSupport: connected && programSupport,
       clockSynced: connected && clockSynced,
       programs,
@@ -937,6 +1002,8 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       setCalibrationPolicy,
       setDisplayPreference,
       setConfirmation,
+      setFlowSign,
+      setInitialVolume,
       programSupport,
       clockSynced,
       programs,

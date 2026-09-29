@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
 import { ConnectBar } from "../components/ConnectBar";
@@ -10,8 +11,10 @@ import {
   manualPickFor,
   resolveCalibration,
   type CalibrationPolicy,
+  initialVolumeFor,
   type ConfirmationPreferences,
   type DisplayPreferences,
+  type FlowSignMode,
 } from "../lib/preferences";
 
 const CONFIRM_OPTIONS: { key: keyof ConfirmationPreferences; label: string; hint: string }[] = [
@@ -26,6 +29,61 @@ const CONFIRM_OPTIONS: { key: keyof ConfirmationPreferences; label: string; hint
     hint: "Pergunta antes de parar um programa ou cancelar um agendamento.",
   },
 ];
+
+const FLOW_SIGN_OPTIONS: { id: FlowSignMode; title: string; text: string }[] = [
+  {
+    id: "signed",
+    title: "Com sentido de rotação",
+    text: "Vazão positiva no sentido direto e negativa no reverso. O volume soma no direto e desconta no reverso.",
+  },
+  {
+    id: "absolute",
+    title: "Sem sentido de rotação",
+    text: "Vazão sempre positiva. O volume acumula tudo o que passou, nos dois sentidos.",
+  },
+];
+
+function InitialVolumeInput({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => {
+    const parsed = Number(draft.replace(",", "."));
+    if (Number.isFinite(parsed)) {
+      onCommit(parsed);
+    } else {
+      setDraft(String(value));
+    }
+  };
+  return (
+    <label className="text-[11px] text-muted-foreground">
+      <span className="font-mono tracking-widest text-faint">{label}</span>
+      <span className="mt-1 flex items-center gap-1.5">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          className="field-light min-w-0 flex-1"
+        />
+        <span>mL</span>
+      </span>
+    </label>
+  );
+}
 
 function Switch({ on }: { on: boolean }) {
   return (
@@ -103,6 +161,8 @@ export function SettingsPage() {
     setManualCalibration,
     setDisplayPreference,
     setConfirmation,
+    setFlowSign,
+    setInitialVolume,
   } = useBench();
 
   return (
@@ -158,6 +218,62 @@ export function SettingsPage() {
               );
             })}
           </ul>
+        </div>
+
+        <div className="mt-10">
+          <p className="text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+            Gráficos de vazão e volume
+          </p>
+          <p className="mt-2 text-[12px] text-muted-foreground">
+            Como o sentido de rotação entra nas curvas. A troca vale também para
+            o que já foi registrado.
+          </p>
+          <div className="mt-3 space-y-2">
+            {FLOW_SIGN_OPTIONS.map((item) => {
+              const selected = preferences.telemetry.flowSign === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setFlowSign(item.id)}
+                  className={`w-full rounded-[14px] px-3 py-3 text-left ring-1 ${
+                    selected ? "bg-run/10 ring-run/30" : "bg-foreground/4 ring-border"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 text-[13px] font-medium">
+                    <span
+                      className={`grid size-4 place-items-center rounded-full ring-1 ${
+                        selected ? "ring-run" : "ring-border"
+                      }`}
+                    >
+                      {selected ? <span className="size-2 rounded-full bg-run" /> : null}
+                    </span>
+                    {item.title}
+                  </span>
+                  <span className="mt-1 block pl-6 text-[12px] text-muted-foreground">
+                    {item.text}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-4 rounded-[14px] bg-foreground/4 p-3 ring-1 ring-border">
+            <p className="text-[13px] font-medium">Volume inicial</p>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              Ponto de partida da curva de volume de cada bomba, por exemplo o que
+              já há no reservatório. Reiniciar o volume no monitoramento volta a este valor.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {pumps.map((pump) => (
+                <InitialVolumeInput
+                  key={pump.id}
+                  label={pump.name}
+                  value={initialVolumeFor(preferences, pump.id)}
+                  onCommit={(value) => setInitialVolume(pump.id, value)}
+                />
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="mt-10">

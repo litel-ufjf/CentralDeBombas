@@ -14,6 +14,8 @@ export function PumpMonitor({
   charts,
   samples,
   volume,
+  initialVolume,
+  signed,
   monitoring,
   onAdd,
   onUpdate,
@@ -23,6 +25,8 @@ export function PumpMonitor({
   charts: PumpChartConfig[];
   samples: TelemetrySample[];
   volume: number;
+  initialVolume: number;
+  signed: boolean;
   monitoring: boolean;
   onAdd: () => void;
   onUpdate: (chart: PumpChartConfig) => void;
@@ -56,16 +60,24 @@ export function PumpMonitor({
             disabled={!monitoring}
             className="rounded-[10px] bg-foreground/5 px-3 py-2 text-[12px] leading-none font-medium ring-1 ring-border disabled:opacity-40"
           >
-            Zerar volume
+            {initialVolume !== 0 ? "Reiniciar volume" : "Zerar volume"}
           </button>
         </div>
       </div>
 
       {monitoring && (
         <p className="mt-3 font-mono text-[12px] text-run">
-          Acumulado {volume.toFixed(2)} mL · {samples.length} amostras
+          Volume {volume.toFixed(2)} mL
+          {initialVolume !== 0 ? ` (inicial ${initialVolume} mL)` : ""} · {samples.length}{" "}
+          amostras
         </p>
       )}
+      <p className="mt-1 text-[11px] text-faint">
+        {signed
+          ? "Vazão positiva no sentido direto e negativa no reverso; o volume soma e subtrai."
+          : "Vazão sempre positiva; o volume acumula nos dois sentidos."}{" "}
+        Altere em Configurações.
+      </p>
 
       {charts.length === 0 && (
         <p className="mt-4 rounded-[12px] bg-panel-2 px-3 py-4 text-center text-[12px] text-muted-foreground ring-1 ring-border">

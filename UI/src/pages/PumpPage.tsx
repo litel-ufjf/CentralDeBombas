@@ -11,7 +11,7 @@ import {
   maxFlowFromCalibration,
   type PumpDirection,
 } from "../lib/calibration";
-import { sourceLabel } from "../lib/preferences";
+import { initialVolumeFor, sourceLabel } from "../lib/preferences";
 import { isOwnedState } from "../lib/protocol";
 import { loadProgram } from "../lib/storage";
 
@@ -270,6 +270,8 @@ export function PumpPage() {
               charts={chartsFor(pump.id)}
               samples={samplesFor(pump.id)}
               volume={volumeFor(pump.id)}
+              initialVolume={initialVolumeFor(preferences, pump.id)}
+              signed={preferences.telemetry.flowSign === "signed"}
               monitoring={monitoringFor(pump.id)}
               onAdd={() => addChart(pump.id)}
               onUpdate={(chart) => updateChart(pump.id, chart)}

@@ -31,11 +31,19 @@ export type ConfirmationPreferences = {
   stopProgram: boolean;
 };
 
+export type FlowSignMode = "signed" | "absolute";
+
+export type TelemetryPreferences = {
+  flowSign: FlowSignMode;
+  initialVolumes: Record<string, number>;
+};
+
 export type Preferences = {
   calibrationPolicy: CalibrationPolicy;
   manualPicks: Record<string, ManualPick>;
   display: DisplayPreferences;
   confirmations: ConfirmationPreferences;
+  telemetry: TelemetryPreferences;
 };
 
 export type CalibrationSource =
@@ -70,7 +78,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
   manualPicks: {},
   display: { ...DEFAULT_DISPLAY },
   confirmations: { ...DEFAULT_CONFIRMATIONS },
+  telemetry: { flowSign: "signed", initialVolumes: {} },
 };
+
+export function initialVolumeFor(prefs: Preferences, pumpId: number) {
+  return prefs.telemetry.initialVolumes[String(pumpId)] ?? 0;
+}
 
 export function sanitizePreferences(value: unknown): Preferences {
   const raw = (value ?? {}) as Partial<Preferences>;
@@ -89,7 +102,16 @@ export function sanitizePreferences(value: unknown): Preferences {
   }
   const display = raw.display ?? DEFAULT_DISPLAY;
   const confirmations = raw.confirmations ?? DEFAULT_CONFIRMATIONS;
+  const initialVolumes: Record<string, number> = {};
+  for (let id = 1; id <= MOTOR_COUNT; id++) {
+    const value = Number(raw.telemetry?.initialVolumes?.[String(id)]);
+    initialVolumes[String(id)] = Number.isFinite(value) ? value : 0;
+  }
   return {
+    telemetry: {
+      flowSign: raw.telemetry?.flowSign === "absolute" ? "absolute" : "signed",
+      initialVolumes,
+    },
     confirmations: {
       pauseProgram: confirmations.pauseProgram !== false,
       stopProgram: confirmations.stopProgram !== false,

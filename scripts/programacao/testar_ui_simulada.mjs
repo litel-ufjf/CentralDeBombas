@@ -16,6 +16,12 @@ const chrome =
 const fakeBoard = `(() => {
   const listeners = new Set();
   const programs = {};
+  const motors = {};
+  [1, 2, 3, 4, 5, 6].forEach((i) => { motors[i] = { en: 0, dir: "F", pwm: 0 }; });
+  const stateLine = () =>
+    "S" + [1, 2, 3, 4, 5, 6].map((i) => programs[i]?.state === "U"
+      ? "," + i + ",1,F,55.00"
+      : "," + i + "," + motors[i].en + "," + motors[i].dir + "," + motors[i].pwm.toFixed(2)).join("");
   const sent = [];
   window.__sent = sent;
   let clockOffset = null;
@@ -35,9 +41,12 @@ const fakeBoard = `(() => {
       case "H": emit("H,BOMBA,6,12,PROG1"); break;
       case "T": clockOffset = Number(parts[1]) - Date.now(); emit("T," + parts[1]); break;
       case "G":
-        emit("S" + [1,2,3,4,5,6].map((i) => "," + i + "," + (programs[i]?.state === "U" ? "1,F,55.00" : "0,F,0.00")).join(""));
+        emit(stateLine());
         Object.keys(programs).forEach((key) => report(Number(key)));
         break;
+      case "P": motors[id].pwm = Number(parts[2]); emit(stateLine()); break;
+      case "D": motors[id].dir = parts[2]; emit(stateLine()); break;
+      case "E": motors[id].en = Number(parts[2]); emit(stateLine()); break;
       case "PB":
         if (p && ["W", "U", "P"].includes(state(p))) { emit("ERR,ocupada"); break; }
         programs[id] = { state: "L", n: Number(parts[2]), got: 0, acc: 0, since: 0, startAt: 0 };
@@ -290,6 +299,58 @@ try {
     "configuração mostra a confirmação de pausa desligada",
     (await run(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Pausar programação"))?.textContent`))?.includes("Não perguntar"),
   );
+
+  await run(`location.hash = "#/bomba/1"`);
+  await sleep(1200);
+  check("adiciona gráfico", await click("Adicionar gráfico"));
+  await run(`(() => {
+    const slider = document.querySelector('input[aria-label="PWM da bomba"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setter.call(slider, "90");
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await sleep(300);
+  check("liga no sentido direto", await click("Ligar bomba"));
+  await sleep(3000);
+  const legend = `[...document.querySelectorAll("span")].filter((s) => /^Vazão -?\\d/.test(s.textContent.trim())).map((s) => s.textContent.trim())[0] ?? ""`;
+  const forward = await run(legend);
+  check("vazão positiva no direto", /^Vazão \d/.test(forward) && !forward.includes("Vazão 0.0"), forward);
+  check("inverte para reverso", await click("Reverso"));
+  await sleep(4000);
+  const reverse = await run(legend);
+  check("vazão negativa no reverso", /^Vazão -\d/.test(reverse), reverse);
+  await run(`[...document.querySelectorAll("p")].find((p) => p.textContent.trim() === "Monitoramento")?.scrollIntoView({ block: "start" })`);
+  await sleep(300);
+  await shot("8_grafico_com_sentido.png");
+
+  await run(`location.hash = "#/configuracoes"`);
+  await sleep(1000);
+  check("opção sem sentido", await run(`(() => {
+    const button = [...document.querySelectorAll("button")].find((b) => b.textContent.startsWith("Sem sentido de rotação"));
+    button?.click();
+    return Boolean(button);
+  })()`));
+  await run(`(() => {
+    const input = [...document.querySelectorAll("label")].find((l) => l.textContent.startsWith("P01"))?.querySelector("input");
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setter.call(input, "100");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.blur();
+    input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  })()`);
+  await sleep(300);
+  await run(`[...document.querySelectorAll("p")].find((p) => p.textContent.trim() === "Gráficos de vazão e volume")?.scrollIntoView({ block: "start" })`);
+  await sleep(300);
+  await shot("9_configuracoes_graficos.png");
+  await run(`location.hash = "#/bomba/1"`);
+  await sleep(1500);
+  const absolute = await run(legend);
+  check("sem sentido: vazão positiva no reverso", /^Vazão \d/.test(absolute) && !absolute.includes("Vazão 0.0"), absolute);
+  const monitorText = await run(`[...document.querySelectorAll("p")].find((p) => p.textContent.includes("amostras"))?.textContent ?? ""`);
+  check("volume parte do inicial", monitorText.includes("inicial 100 mL"), monitorText);
+  await run(`[...document.querySelectorAll("p")].find((p) => p.textContent.trim() === "Monitoramento")?.scrollIntoView({ block: "start" })`);
+  await sleep(300);
+  await shot("10_grafico_sem_sentido.png");
   ws.close();
 } finally {
   browser.kill();

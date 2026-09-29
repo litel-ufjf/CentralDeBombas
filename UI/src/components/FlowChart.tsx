@@ -15,14 +15,46 @@ const WIDTH = 640;
 const HEIGHT = 220;
 const PAD = { top: 18, right: 48, bottom: 28, left: 48 };
 
-function niceMax(value: number) {
-  if (value <= 0) {
-    return 1;
-  }
+const TICKS = 4;
+
+function niceStep(value: number) {
   const exp = 10 ** Math.floor(Math.log10(value));
   const scaled = value / exp;
-  const nice = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+  const nice = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 2.5 ? 2.5 : scaled <= 5 ? 5 : 10;
   return nice * exp;
+}
+
+function niceRange(values: number[], includeZero: boolean): [number, number] {
+  let lo = values.length ? Math.min(...values) : 0;
+  let hi = values.length ? Math.max(...values) : 0;
+  if (includeZero) {
+    lo = Math.min(0, lo);
+    hi = Math.max(0, hi);
+  }
+  if (hi - lo < 1e-9) {
+    if (includeZero && lo === 0) {
+      return [0, 1];
+    }
+    const pad = Math.max(1, Math.abs(hi) * 0.1);
+    lo -= pad;
+    hi += pad;
+  }
+  let step = niceStep((hi - lo) / TICKS);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const start = Math.floor(lo / step) * step;
+    if (start + step * TICKS >= hi - 1e-9) {
+      return [start, start + step * TICKS];
+    }
+    step = niceStep(step * 1.01);
+  }
+  return [lo, hi];
+}
+
+function formatTick(value: number) {
+  if (Math.abs(value) < 1e-9) {
+    return "0";
+  }
+  return Math.abs(value) >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
 function toPath(points: { x: number; y: number }[]) {
@@ -72,16 +104,17 @@ export function FlowChart({
   const series = chart.series;
   const showFlow = series.includes("flow");
   const showVolume = series.includes("volume");
-  const flowMax = niceMax(Math.max(...visible.map((sample) => sample.flow), 0));
-  const volumeMax = niceMax(Math.max(...visible.map((sample) => sample.volume), 0));
+  const [flowMin, flowMax] = niceRange(visible.map((sample) => sample.flow), true);
+  const [volumeMin, volumeMax] = niceRange(visible.map((sample) => sample.volume), false);
   const innerW = WIDTH - PAD.left - PAD.right;
   const innerH = HEIGHT - PAD.top - PAD.bottom;
 
   const mapX = (t: number) => PAD.left + ((t - tMin) / span) * innerW;
   const mapFlow = (value: number) =>
-    PAD.top + innerH - (value / flowMax) * innerH;
+    PAD.top + innerH - ((value - flowMin) / (flowMax - flowMin)) * innerH;
   const mapVolume = (value: number) =>
-    PAD.top + innerH - (value / volumeMax) * innerH;
+    PAD.top + innerH - ((value - volumeMin) / (volumeMax - volumeMin)) * innerH;
+  const flowZeroY = mapFlow(0);
 
   const flowPoints = visible.map((sample) => ({
     x: mapX(sample.t),
@@ -93,7 +126,7 @@ export function FlowChart({
   }));
 
   const last = visible[visible.length - 1];
-  const ticks = 4;
+  const ticks = TICKS;
 
   return (
     <div className="overflow-hidden rounded-[14px] bg-panel-2 ring-1 ring-border">
@@ -128,10 +161,22 @@ export function FlowChart({
             />
           );
         })}
+        {showFlow && flowMin < 0 && (
+          <line
+            x1={PAD.left}
+            x2={WIDTH - PAD.right}
+            y1={flowZeroY}
+            y2={flowZeroY}
+            stroke="oklch(48% 0.12 232)"
+            strokeOpacity="0.45"
+            strokeDasharray="3 3"
+            strokeWidth="1"
+          />
+        )}
         {showFlow && flowPoints.length > 1 && (
           <>
             <path
-              d={`${toPath(flowPoints)} L ${flowPoints[flowPoints.length - 1].x.toFixed(1)} ${PAD.top + innerH} L ${flowPoints[0].x.toFixed(1)} ${PAD.top + innerH} Z`}
+              d={`${toPath(flowPoints)} L ${flowPoints[flowPoints.length - 1].x.toFixed(1)} ${flowZeroY.toFixed(1)} L ${flowPoints[0].x.toFixed(1)} ${flowZeroY.toFixed(1)} Z`}
               fill={`url(#flowFill-${chart.id})`}
             />
             <path
@@ -168,7 +213,7 @@ export function FlowChart({
         )}
         {showFlow &&
           Array.from({ length: ticks + 1 }, (_, index) => {
-            const value = flowMax * (1 - index / ticks);
+            const value = flowMax - ((flowMax - flowMin) * index) / ticks;
             const y = PAD.top + (innerH * index) / ticks;
             return (
               <text
@@ -179,13 +224,13 @@ export function FlowChart({
                 fontSize="9"
                 className="fill-muted-foreground"
               >
-                {value >= 10 ? value.toFixed(0) : value.toFixed(1)}
+                {formatTick(value)}
               </text>
             );
           })}
         {showVolume &&
           Array.from({ length: ticks + 1 }, (_, index) => {
-            const value = volumeMax * (1 - index / ticks);
+            const value = volumeMax - ((volumeMax - volumeMin) * index) / ticks;
             const y = PAD.top + (innerH * index) / ticks;
             return (
               <text
@@ -196,7 +241,7 @@ export function FlowChart({
                 fontSize="9"
                 className="fill-muted-foreground"
               >
-                {value >= 10 ? value.toFixed(0) : value.toFixed(1)}
+                {formatTick(value)}
               </text>
             );
           })}
