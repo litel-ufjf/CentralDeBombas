@@ -6,6 +6,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { BenchProvider } from "./context/BenchContext";
+import { ExperimentWindowProvider } from "./context/ExperimentWindowContext";
 import { IndexPage } from "./pages/IndexPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { PumpPage } from "./pages/PumpPage";
@@ -15,7 +16,9 @@ const rootRoute = createRootRoute({
   component: function RootLayout() {
     return (
       <BenchProvider>
-        <Outlet />
+        <ExperimentWindowProvider>
+          <Outlet />
+        </ExperimentWindowProvider>
       </BenchProvider>
     );
   },

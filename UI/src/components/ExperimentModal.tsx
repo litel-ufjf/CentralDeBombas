@@ -788,10 +788,14 @@ function TrashCan({ open }: { open: boolean }) {
 export function ExperimentModal({
   pumpId,
   pumpName,
+  minimized = false,
+  onMinimize,
   onClose,
 }: {
   pumpId: number;
   pumpName: string;
+  minimized?: boolean;
+  onMinimize?: () => void;
   onClose: () => void;
 }) {
   const [blocks, setBlocks] = useState<ExperimentBlock[]>(() => loadProgram(pumpId));
@@ -806,6 +810,9 @@ export function ExperimentModal({
   blocksRef.current = blocks;
 
   useEffect(() => {
+    if (minimized) {
+      return;
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
@@ -813,7 +820,7 @@ export function ExperimentModal({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [minimized, onClose]);
 
   const resetDrag = () => {
     dragRef.current = null;
@@ -894,7 +901,11 @@ export function ExperimentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
+    <div
+      className={
+        minimized ? "hidden" : "fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
+      }
+    >
       <button
         type="button"
         aria-label="Fechar programação"
@@ -908,14 +919,29 @@ export function ExperimentModal({
         className="relative flex h-[min(780px,90vh)] w-[min(1010px,96vw)] flex-col overflow-hidden rounded-[10px] bg-[#f6f9fc] shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/5"
         style={{ fontFamily: BLOCK_FONT }}
       >
-        <button
-          type="button"
-          aria-label="Fechar"
-          onClick={onClose}
-          className="absolute top-1.5 right-2 z-10 grid size-6 place-items-center rounded-full text-[18px] leading-none text-slate-600 hover:bg-slate-200/70"
-        >
-          ×
-        </button>
+        <div className="absolute top-1.5 right-2 z-10 flex items-center gap-0.5">
+          {onMinimize ? (
+            <button
+              type="button"
+              aria-label="Minimizar"
+              title="Minimizar: acompanhe a execução no canto da tela"
+              onClick={onMinimize}
+              className="grid size-6 place-items-center rounded-full text-slate-600 hover:bg-slate-200/70"
+            >
+              <svg aria-hidden viewBox="0 0 12 12" className="size-3">
+                <path d="M2 9.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Fechar"
+            onClick={onClose}
+            className="grid size-6 place-items-center rounded-full text-[18px] leading-none text-slate-600 hover:bg-slate-200/70"
+          >
+            ×
+          </button>
+        </div>
 
         <header className="flex items-center gap-4 pt-[34px] pr-6 pb-[14px] pl-6">
           <h2

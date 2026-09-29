@@ -16,7 +16,7 @@ rmSync(join(release, "win-unpacked.tmp"), { recursive: true, force: true });
 
 const result = spawnSync(
   "npx",
-  ["electron-builder", "--win", `--config.directories.output=${staging}`],
+  ["electron-builder", "--win", "--publish", "never", `--config.directories.output=${staging}`],
   { cwd: root, stdio: "inherit", shell: true },
 );
 if (result.status !== 0) {

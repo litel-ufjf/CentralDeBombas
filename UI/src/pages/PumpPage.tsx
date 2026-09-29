@@ -1,12 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
 import { CalibrationTabs } from "../components/CalibrationTabs";
 import { ConnectBar } from "../components/ConnectBar";
-import { ExperimentModal } from "../components/ExperimentModal";
 import { ProgramControls } from "../components/ProgramControls";
 import { PumpMonitor } from "../components/PumpMonitor";
 import { useBench } from "../context/BenchContext";
+import { useExperimentWindow } from "../context/ExperimentWindowContext";
 import {
   maxFlowFromCalibration,
   type PumpDirection,
@@ -38,12 +38,13 @@ export function PumpPage() {
     preferences,
     programs,
   } = useBench();
-  const [experimentOpen, setExperimentOpen] = useState(false);
+  const { openId, minimized, openExperiment } = useExperimentWindow();
   const pump = pumps.find((item) => item.id === Number(id));
   const maxFlow = pump ? maxFlowFromCalibration(pump.calibration) : 0;
+  const editorShown = openId === Number(id) && !minimized;
   const savedProgram = useMemo(
-    () => (experimentOpen ? [] : loadProgram(Number(id))),
-    [experimentOpen, id],
+    () => (editorShown ? [] : loadProgram(Number(id))),
+    [editorShown, id],
   );
   const programmed = pump ? isOwnedState(programs[pump.id - 1].state) : false;
   const manual = connected && !programmed;
@@ -219,7 +220,7 @@ export function PumpPage() {
         {preferences.display.experiment ? (
           <button
             type="button"
-            onClick={() => setExperimentOpen(true)}
+            onClick={() => openExperiment(pump.id)}
             className="mt-3 w-full rounded-[14px] bg-panel-2 py-3.5 text-[13px] leading-none font-semibold text-foreground ring-1 ring-border"
           >
             Programar experimento
@@ -278,14 +279,6 @@ export function PumpPage() {
           </div>
         ) : null}
       </section>
-      {experimentOpen ? (
-        <ExperimentModal
-          key={pump.id}
-          pumpId={pump.id}
-          pumpName={pump.name}
-          onClose={() => setExperimentOpen(false)}
-        />
-      ) : null}
     </AppShell>
   );
 }

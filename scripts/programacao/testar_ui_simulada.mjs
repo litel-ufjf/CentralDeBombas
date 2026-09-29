@@ -259,9 +259,17 @@ try {
   check("mostra Agendado", (await run(`${footer}.textContent`)).includes("Agendado"));
   await shot("5_agendado.png");
 
-  await run(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  const dock = `document.querySelector('aside[aria-label="Programações em andamento"]')`;
+  const modalVisible = `Boolean(document.querySelector('[role="dialog"]')?.offsetParent)`;
   await run(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
   await sleep(500);
+  check("fechar com programa ativo minimiza", !(await run(modalVisible)) && Boolean(await run(`Boolean(document.querySelector('[role="dialog"]'))`)));
+  check("painel flutuante mostra o agendamento", (await run(`${dock}?.textContent ?? ""`)).includes("Agendado"));
+  check("reabre pelo painel", (await click("Abrir editor", dock)) && (await run(modalVisible)));
+  await sleep(300);
+  check("botão minimizar", (await run(`(() => { const b = document.querySelector('[aria-label="Minimizar"]'); b?.click(); return Boolean(b); })()`)));
+  await sleep(400);
+  check("minimizado de novo", !(await run(modalVisible)) && Boolean(await run(`Boolean(${dock})`)));
   const locked = await run(
     `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Ligar bomba")?.disabled`,
   );
@@ -270,12 +278,13 @@ try {
   await sleep(300);
   await shot("6_pagina_bomba.png");
 
-  await send("Page.navigate", { url: `${base}#/` });
+  await run(`location.hash = "#/"`);
   await sleep(1500);
   check("selo no painel", (await run("document.body.textContent")).includes("Agendado"));
+  check("painel flutuante segue na tela inicial", Boolean(await run(`Boolean(${dock})`)));
   await shot("7_painel.png");
 
-  await send("Page.navigate", { url: `${base}#/configuracoes` });
+  await run(`location.hash = "#/configuracoes"`);
   await sleep(1200);
   check(
     "configuração mostra a confirmação de pausa desligada",

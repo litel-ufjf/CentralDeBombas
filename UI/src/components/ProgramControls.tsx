@@ -102,7 +102,7 @@ export function ProgramControls({
   pumpName: string;
   blocks: ExperimentBlock[];
   onBeforeRun?: () => void;
-  layout: "bar" | "card";
+  layout: "bar" | "card" | "mini";
 }) {
   const {
     connected,
@@ -254,12 +254,14 @@ export function ProgramControls({
 
   const canStart = connected && programSupport && !busy && !compiled.error;
   const bar = layout === "bar";
+  const mini = layout === "mini";
 
-  const buttonBase =
-    "shrink-0 rounded-[8px] px-3.5 py-2 text-[12.5px] leading-none font-semibold ring-1 disabled:cursor-not-allowed disabled:opacity-40";
+  const buttonBase = `shrink-0 rounded-[8px] leading-none font-semibold ring-1 disabled:cursor-not-allowed disabled:opacity-40 ${
+    mini ? "px-2.5 py-1.5 text-[11.5px]" : "px-3.5 py-2 text-[12.5px]"
+  }`;
 
   const statusBlock = (
-    <div className={`min-w-0 ${bar ? "flex-1" : ""}`}>
+    <div className={`min-w-0 ${bar || mini ? "flex-1" : ""}`}>
       <div className="flex items-center gap-2">
         <span
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${
@@ -289,7 +291,7 @@ export function ProgramControls({
         <p role="alert" className="mt-1 text-[12px] text-[var(--destructive)]">
           {message}
         </p>
-      ) : hint ? (
+      ) : hint && !mini ? (
         <p className="mt-1 text-[11.5px] text-faint">{hint}</p>
       ) : null}
     </div>
@@ -323,10 +325,10 @@ export function ProgramControls({
         disabled={!connected}
         className={`${buttonBase} bg-[var(--destructive)] text-white ring-[var(--destructive)] hover:brightness-95`}
       >
-        {status.state === "waiting" ? "Cancelar agendamento" : "Parar"}
+        {status.state === "waiting" ? (mini ? "Cancelar" : "Cancelar agendamento") : "Parar"}
       </button>
     </div>
-  ) : (
+  ) : mini ? null : (
     <div className={`flex items-center gap-2 ${bar ? "shrink-0" : "flex-wrap"}`}>
       <div
         role="radiogroup"
@@ -376,7 +378,12 @@ export function ProgramControls({
 
   return (
     <>
-      {bar ? (
+      {mini ? (
+        <div className="space-y-2">
+          {statusBlock}
+          {actions ? <div className="flex justify-end">{actions}</div> : null}
+        </div>
+      ) : bar ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {statusBlock}
           {actions}
