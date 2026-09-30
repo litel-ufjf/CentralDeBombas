@@ -251,7 +251,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   const heartbeatRef = useRef<number | null>(null);
   const helloWaitRef = useRef<((ok: boolean) => void) | null>(null);
   const programSupportRef = useRef(false);
-  const conditionSupportRef = useRef(false);
+  const programLevelRef = useRef(0);
   const programsRef = useRef(programs);
   programsRef.current = programs;
   const lastClockSyncRef = useRef(0);
@@ -310,7 +310,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         await client.disconnect();
       }
       programSupportRef.current = false;
-      conditionSupportRef.current = false;
+      programLevelRef.current = 0;
       setConnected(false);
       setConnecting(false);
       setSetpoints(createDefaultSetpoints());
@@ -348,7 +348,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
           }
           if (line.kind === "hello") {
             programSupportRef.current = line.programs;
-            conditionSupportRef.current = line.conditions;
+            programLevelRef.current = line.programLevel;
             helloWaitRef.current?.(true);
             helloWaitRef.current = null;
             return;
@@ -848,9 +848,11 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         throw new Error("Escolha um horário no futuro para agendar.");
       }
       const program = compileProgram(blocks);
-      if (program.needsConditions && !conditionSupportRef.current) {
+      if (program.firmwareLevel > programLevelRef.current) {
         throw new Error(
-          "Esta programação compara tempo, volume ou usa < e ≤, o que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado.",
+          program.firmwareLevel >= 3
+            ? "Esta programação usa senão, escolha/caso, = ou ≠, ou a variável Sentido, que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado."
+            : "Esta programação compara tempo, volume ou usa < e ≤, o que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado.",
         );
       }
       const set = calibrations[id - 1];

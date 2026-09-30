@@ -17,35 +17,43 @@ import {
   BLOCK_SM,
   OUTPUT_TAB_W,
   booleanPath,
-  cBlockPath,
+  multiCPath,
   reporterPath,
   shade,
   statementPath,
   type BlockMetrics,
 } from "../lib/blockShapes";
 import {
+  BODY,
   CATEGORY_COLOR,
   COMPARE_OPS,
   COND_LEFT,
   COND_RIGHT,
+  ELSE,
   PALETTE,
   REPORTER_HINT,
+  addCase,
+  caseKey,
   clearSlot,
   containsId,
   createBlock,
   emptyCondition,
   findBlock,
   insertBlock,
+  isBooleanRef,
+  isComparison,
   isContainer,
   isReporter,
   isStatement,
   kindCategory,
   moveBlock,
   removeBlock,
+  removeCase,
   reporterLabel,
   setCompareOp,
   setCondition,
   setField,
+  toggleElse,
   type BlockKind,
   type CompareOp,
   type ExperimentBlock,
@@ -119,7 +127,7 @@ function svgGlow(color: string | undefined) {
     : undefined;
 }
 
-type DropTarget = { parentId: string | null; index: number };
+type DropTarget = { parentId: string | null; branch: string; index: number };
 type DragPayload =
   | { from: "palette"; kind: BlockKind }
   | { from: "canvas"; id: string }
@@ -146,6 +154,21 @@ function payloadKind(payload: DragPayload | null): DragKind | null {
   return "statement";
 }
 
+/** Variável que pode ocupar sozinha o espaço de condição (Sentido). */
+function booleanRefOf(payload: DragPayload | null): IoRef | null {
+  if (payload?.from === "palette" && isReporter(payload.kind) && isBooleanRef(payload.kind)) {
+    return payload.kind;
+  }
+  if (payload?.from === "slot" && isBooleanRef(payload.ref)) {
+    return payload.ref;
+  }
+  return null;
+}
+
+const acceptsValue = (payload: DragPayload | null) => payloadKind(payload) === "value";
+const acceptsCondition = (payload: DragPayload | null) =>
+  payloadKind(payload) === "condition" || booleanRefOf(payload) !== null;
+
 type SlotApi = {
   dragKind: DragKind | null;
   payload: () => DragPayload | null;
@@ -154,6 +177,9 @@ type SlotApi = {
   dropValue: (blockId: string, key: string) => void;
   dropCondition: (blockId: string) => void;
   setOp: (blockId: string, op: CompareOp) => void;
+  toggleElse: (blockId: string) => void;
+  addCase: (blockId: string) => void;
+  removeCase: (blockId: string, caseId: string) => void;
 };
 
 const SlotContext = createContext<SlotApi | null>(null);
@@ -167,12 +193,12 @@ function useSlots() {
 }
 
 /** Aceita o arraste só quando o tipo do bloco arrastado combina com o encaixe. */
-function useSlotDrop(kind: DragKind, onDrop: () => void) {
+function useSlotDrop(accept: (payload: DragPayload | null) => boolean, onDrop: () => void) {
   const api = useSlots();
   const [over, setOver] = useState(false);
-  const matches = () => payloadKind(api.payload()) === kind;
+  const matches = () => accept(api.payload());
   return {
-    accepting: api.dragKind === kind,
+    accepting: api.dragKind !== null && matches(),
     over,
     props: {
       onDragOver: (event: DragEvent) => {
@@ -269,11 +295,21 @@ function StatementShape({
   );
 }
 
+type CArm = {
+  key: string;
+  /** Barra acima do braço (senão, caso…); ignorada no primeiro braço, que fica sob o cabeçalho. */
+  label?: ReactNode;
+  content: ReactNode;
+  onLabelDragOver?: (event: DragEvent<HTMLDivElement>) => void;
+};
+
+type Size = { w: number; h: number };
+
 function CShape({
   color,
   metrics,
   header,
-  children,
+  arms,
   innerMinH,
   bottomRatio = 0.62,
   stackGap = 0,
@@ -283,52 +319,103 @@ function CShape({
   color: string;
   metrics: BlockMetrics;
   header: ReactNode;
-  children: ReactNode;
+  arms: CArm[];
   innerMinH: number;
   bottomRatio?: number;
   stackGap?: number;
   onHeaderDragOver?: (event: DragEvent<HTMLDivElement>) => void;
   onBottomDragOver?: (event: DragEvent<HTMLDivElement>) => void;
 }) {
-  const [headRef, head] = useBoxSize<HTMLDivElement>();
-  const [innerRef, inner] = useBoxSize<HTMLDivElement>();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [segments, setSegments] = useState<Size[]>([]);
+  const signature = arms.map((arm) => arm.key).join("|");
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    const elements = Array.from(root.querySelectorAll<HTMLElement>(":scope > [data-seg]"));
+    const update = () => {
+      const next = elements.map((element) => ({ w: element.offsetWidth, h: element.offsetHeight }));
+      setSegments((current) =>
+        current.length === next.length &&
+        current.every((size, i) => size.w === next[i].w && size.h === next[i].h)
+          ? current
+          : next,
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [signature]);
+
+  const head = segments[0] ?? { w: 0, h: 0 };
   const bottomW = Math.min(
     head.w,
     Math.max(metrics.armW + 40, Math.round(head.w * bottomRatio)),
   );
+  const ready = head.w > 0 && segments.length === arms.length * 2;
+  const sections = ready
+    ? arms.map((_, i) => {
+        const bar = i + 1 < arms.length ? segments[2 * i + 2] : { w: bottomW, h: metrics.bottomH };
+        return { innerH: segments[2 * i + 1].h, barW: bar.w, barH: bar.h };
+      })
+    : [];
+  const height = head.h + sections.reduce((sum, item) => sum + item.innerH + item.barH, 0);
+  const width = Math.max(head.w, ...sections.map((item) => item.barW));
+  const inner = (content: ReactNode) => (
+    <div
+      data-seg
+      className="relative flex flex-col items-start"
+      style={{
+        marginLeft: metrics.armW,
+        minHeight: innerMinH,
+        gap: stackGap,
+        paddingTop: stackGap,
+        paddingBottom: stackGap,
+      }}
+    >
+      {content}
+    </div>
+  );
+
   return (
-    <div className="pointer-events-none relative inline-flex flex-col items-start">
-      {head.w > 0 ? (
+    <div ref={rootRef} className="pointer-events-none relative inline-flex flex-col items-start">
+      {ready ? (
         <svg
           aria-hidden
-          width={head.w}
-          height={head.h + inner.h + metrics.bottomH}
+          width={width}
+          height={height}
           className="pointer-events-none absolute top-0 left-0 overflow-visible"
         >
-          <ShapePath d={cBlockPath(head.w, head.h, inner.h, bottomW, metrics)} color={color} />
+          <ShapePath d={multiCPath(head.w, head.h, sections, metrics)} color={color} />
         </svg>
       ) : null}
       <div
-        ref={headRef}
+        data-seg
         onDragOver={onHeaderDragOver}
         className="pointer-events-auto relative flex items-center"
         style={{ minHeight: metrics.minH }}
       >
         {header}
       </div>
-      <div
-        ref={innerRef}
-        className="relative flex flex-col items-start"
-        style={{
-          marginLeft: metrics.armW,
-          minHeight: innerMinH,
-          gap: stackGap,
-          paddingTop: stackGap,
-          paddingBottom: stackGap,
-        }}
-      >
-        {children}
-      </div>
+      {arms.map((arm, i) => (
+        <Fragment key={arm.key}>
+          {i > 0 ? (
+            <div
+              data-seg
+              onDragOver={arm.onLabelDragOver}
+              className="pointer-events-auto relative flex items-center"
+              style={{ minHeight: metrics.minH, minWidth: bottomW }}
+            >
+              {arm.label}
+            </div>
+          ) : null}
+          {inner(arm.content)}
+        </Fragment>
+      ))}
       <div
         onDragOver={onBottomDragOver}
         className="pointer-events-auto relative"
@@ -392,7 +479,7 @@ function ValueInput({
   onChange: (next: FieldValue) => void;
 }) {
   const api = useSlots();
-  const drop = useSlotDrop("value", () => api.dropValue(blockId, slot));
+  const drop = useSlotDrop(acceptsValue, () => api.dropValue(blockId, slot));
   const glow = drop.over ? SLOT_OVER : drop.accepting ? SLOT_ACCEPT : undefined;
 
   if (value && typeof value === "object" && "ref" in value) {
@@ -538,6 +625,26 @@ function CompareBlock({
   if (!condition) {
     return null;
   }
+  if (!isComparison(condition)) {
+    return (
+      <span
+        draggable
+        onDragStart={(event) => {
+          event.stopPropagation();
+          api.startDrag(event, { from: "cond", blockId: block.id });
+        }}
+        onDragEnd={api.endDrag}
+        title={`${REPORTER_HINT[condition.ref]}. Arraste para outro bloco, ou para a lixeira para remover.`}
+        className="inline-flex cursor-grab active:cursor-grabbing"
+      >
+        <HexShape color={CATEGORY_COLOR.io} glow={glow}>
+          <span className="relative py-[5px] pr-[16px] pl-[16px] text-[14.5px] leading-none whitespace-nowrap text-white">
+            {reporterLabel(condition.ref)}
+          </span>
+        </HexShape>
+      </span>
+    );
+  }
   const color = CATEGORY_COLOR.compare;
   return (
     <span
@@ -584,14 +691,14 @@ function ConditionSlot({
   onField: (key: string, value: FieldValue) => void;
 }) {
   const api = useSlots();
-  const drop = useSlotDrop("condition", () => api.dropCondition(block.id));
+  const drop = useSlotDrop(acceptsCondition, () => api.dropCondition(block.id));
   const glow = drop.over ? SLOT_OVER : drop.accepting ? SLOT_ACCEPT : undefined;
   return (
     <span {...drop.props} className="inline-flex items-center">
       {block.condition ? (
         <CompareBlock block={block} glow={glow} onField={onField} />
       ) : (
-        <span title="Encaixe aqui uma Comparação" className="inline-flex">
+        <span title="Encaixe aqui uma Comparação ou a variável Sentido" className="inline-flex">
           <HexShape color={shade(color, 0.3)} glow={glow} dashed minW={64} />
         </span>
       )}
@@ -746,6 +853,34 @@ function ChartRow({ label, chart, control }: { label: string; chart: ReactNode; 
   );
 }
 
+function BlockButton({
+  color,
+  label,
+  onClick,
+  children,
+}: {
+  color: string;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="h-[22px] cursor-pointer rounded-[4px] px-[7px] text-[13px] leading-none text-white/90 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+      style={{ background: shade(color, 0.2) }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function BlockBody({
   block,
   color,
@@ -755,6 +890,7 @@ function BlockBody({
   color: string;
   onField: (key: string, value: FieldValue) => void;
 }) {
+  const api = useSlots();
   const field = (key: string) => (
     <ValueInput
       color={color}
@@ -789,6 +925,24 @@ function BlockBody({
       return (
         <Row>
           Se <ConditionSlot block={block} color={color} onField={onField} />
+          {block.elseChildren ? null : (
+            <BlockButton
+              color={color}
+              label="Acrescentar um braço “senão”"
+              onClick={() => api.toggleElse(block.id)}
+            >
+              + senão
+            </BlockButton>
+          )}
+        </Row>
+      );
+    case "switch":
+      return (
+        <Row>
+          Escolha {field("value")}
+          <BlockButton color={color} label="Acrescentar um caso" onClick={() => api.addCase(block.id)}>
+            + caso
+          </BlockButton>
         </Row>
       );
     case "setFlow":
@@ -844,10 +998,12 @@ function BlockBody({
           />
         </div>
       );
+    case "ifElse":
     case "compare":
     case "varFlow":
     case "varTime":
     case "varVolume":
+    case "varDir":
       return null;
   }
 }
@@ -900,22 +1056,59 @@ function pickHalf(
 function CanvasNode({
   block,
   parentId,
+  branch,
   index,
   ...handlers
-}: { block: ExperimentBlock; parentId: string | null; index: number } & NodeHandlers) {
+}: {
+  block: ExperimentBlock;
+  parentId: string | null;
+  branch: string;
+  index: number;
+} & NodeHandlers) {
+  const api = useSlots();
   const color = CATEGORY_COLOR[kindCategory(block.kind)];
   const dragging = handlers.draggingId === block.id;
-  const body = (
+  const onField = (key: string, value: FieldValue) => handlers.onField(block.id, key, value);
+  const cases = block.kind === "switch" ? (block.cases ?? []) : [];
+  const caseRow = (item: (typeof cases)[number]) => (
+    <Row>
+      caso
+      <ValueInput
+        color={color}
+        blockId={block.id}
+        slot={caseKey(item.id)}
+        value={item.match}
+        onChange={(next) => onField(caseKey(item.id), next)}
+      />
+      {cases.length > 1 ? (
+        <BlockButton
+          color={color}
+          label="Remover este caso"
+          onClick={() => api.removeCase(block.id, item.id)}
+        >
+          ×
+        </BlockButton>
+      ) : null}
+    </Row>
+  );
+  const textBox = (content: ReactNode) => (
     <div
       className="py-[5px] pr-[14px] pl-[12px] text-[16px] leading-none text-white"
       style={{ fontFamily: BLOCK_FONT }}
     >
-      <BlockBody
-        block={block}
-        color={color}
-        onField={(key, value) => handlers.onField(block.id, key, value)}
-      />
+      {content}
     </div>
+  );
+  const blockBody = <BlockBody block={block} color={color} onField={onField} />;
+  const body = textBox(
+    block.kind === "switch" ? (
+      <div className="flex flex-col gap-[7px]">
+        {blockBody}
+        {cases[0] ? caseRow(cases[0]) : <Row>caso contrário</Row>}
+      </div>
+    ) : (
+      blockBody
+    ),
   );
   const dragProps = {
     draggable: true,
@@ -928,6 +1121,43 @@ function CanvasNode({
   };
 
   if (isContainer(block.kind)) {
+    const into = (key: string) => (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handlers.onHover({ parentId: block.id, branch: key, index: 0 });
+    };
+    const arm = (key: string, list: ExperimentBlock[], label?: ReactNode): CArm => ({
+      key,
+      label: label === undefined ? undefined : textBox(label),
+      content: <Stack blocks={list} parentId={block.id} branch={key} {...handlers} />,
+      onLabelDragOver: into(key),
+    });
+    const elseArm = (label: ReactNode) => arm(ELSE, block.elseChildren ?? [], label);
+    const arms: CArm[] =
+      block.kind === "switch"
+        ? [
+            ...cases.map((item, i) =>
+              arm(caseKey(item.id), item.children, i > 0 ? caseRow(item) : undefined),
+            ),
+            elseArm(<Row>caso contrário</Row>),
+          ]
+        : [arm(BODY, block.children ?? [])];
+    if (block.kind !== "switch" && block.elseChildren) {
+      arms.push(
+        elseArm(
+          <Row>
+            senão
+            <BlockButton
+              color={color}
+              label="Remover o braço “senão” (e os blocos dentro dele)"
+              onClick={() => api.toggleElse(block.id)}
+            >
+              ×
+            </BlockButton>
+          </Row>,
+        ),
+      );
+    }
     return (
       <div
         {...dragProps}
@@ -945,22 +1175,21 @@ function CanvasNode({
           header={body}
           innerMinH={BLOCK_MD.minH * 0.75}
           stackGap={STACK_GAP}
+          arms={arms}
           onHeaderDragOver={(event) =>
             pickHalf(
               event,
-              { parentId, index },
-              { parentId: block.id, index: 0 },
+              { parentId, branch, index },
+              { parentId: block.id, branch: arms[0].key, index: 0 },
               handlers.onHover,
             )
           }
           onBottomDragOver={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            handlers.onHover({ parentId, index: index + 1 });
+            handlers.onHover({ parentId, branch, index: index + 1 });
           }}
-        >
-          <Stack blocks={block.children ?? []} parentId={block.id} {...handlers} />
-        </CShape>
+        />
       </div>
     );
   }
@@ -972,7 +1201,12 @@ function CanvasNode({
         dragging ? "opacity-40" : ""
       }`}
       onDragOver={(event) =>
-        pickHalf(event, { parentId, index }, { parentId, index: index + 1 }, handlers.onHover)
+        pickHalf(
+          event,
+          { parentId, branch, index },
+          { parentId, branch, index: index + 1 },
+          handlers.onHover,
+        )
       }
     >
       <StatementShape color={color} metrics={BLOCK_MD}>
@@ -985,15 +1219,20 @@ function CanvasNode({
 function Stack({
   blocks,
   parentId,
+  branch,
   ...handlers
-}: { blocks: ExperimentBlock[]; parentId: string | null } & NodeHandlers) {
-  const markerAt = handlers.hover && handlers.hover.parentId === parentId ? handlers.hover.index : -1;
+}: { blocks: ExperimentBlock[]; parentId: string | null; branch: string } & NodeHandlers) {
+  const hover = handlers.hover;
+  const markerAt =
+    hover && hover.parentId === parentId && (parentId === null || hover.branch === branch)
+      ? hover.index
+      : -1;
   return (
     <>
       {blocks.map((block, index) => (
         <Fragment key={block.id}>
           {markerAt === index ? <InsertionMarker metrics={BLOCK_MD} /> : null}
-          <CanvasNode block={block} parentId={parentId} index={index} {...handlers} />
+          <CanvasNode block={block} parentId={parentId} branch={branch} index={index} {...handlers} />
         </Fragment>
       ))}
       {markerAt === blocks.length ? <InsertionMarker metrics={BLOCK_MD} /> : null}
@@ -1003,7 +1242,7 @@ function Stack({
           onDragOver={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            handlers.onHover({ parentId, index: 0 });
+            handlers.onHover({ parentId, branch, index: 0 });
           }}
         />
       ) : null}
@@ -1026,7 +1265,9 @@ function PaletteBlock({
   const kind = item.kind;
   if (isReporter(kind) || kind === "compare") {
     const hint = isReporter(kind)
-      ? `${REPORTER_HINT[kind]}. Arraste para um campo numérico de um bloco.`
+      ? `${REPORTER_HINT[kind]}. Arraste para um campo numérico de um bloco${
+          isBooleanRef(kind) ? " ou para o espaço de condição de Enquanto/Se" : ""
+        }.`
       : "Arraste para o espaço de condição de um bloco Enquanto ou Se, e depois encaixe variáveis nela.";
     return (
       <div
@@ -1093,16 +1334,33 @@ function PaletteBlock({
       }}
       className="w-fit cursor-grab rounded-[6px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
     >
-      {item.kind === "if" ? (
+      {item.kind === "if" || item.kind === "ifElse" || item.kind === "switch" ? (
         <CShape
           color={color}
           metrics={BLOCK_SM}
           header={<div className="pr-[22px]">{text}</div>}
           innerMinH={9}
           bottomRatio={1}
-        >
-          {null}
-        </CShape>
+          arms={
+            item.kind === "if"
+              ? [{ key: "a", content: null }]
+              : [
+                  { key: "a", content: null },
+                  {
+                    key: "b",
+                    content: null,
+                    label: (
+                      <div
+                        className="py-[4px] pr-[12px] pl-[9px] text-[13.5px] leading-none whitespace-nowrap text-white"
+                        style={{ fontFamily: BLOCK_FONT }}
+                      >
+                        {item.kind === "ifElse" ? "senão" : "caso…"}
+                      </div>
+                    ),
+                  },
+                ]
+          }
+        />
       ) : (
         <StatementShape color={color} metrics={BLOCK_SM}>
           {text}
@@ -1523,7 +1781,10 @@ export function ExperimentModal({
       }
     }
     setHover((current) =>
-      current && current.parentId === target.parentId && current.index === target.index
+      current &&
+      current.parentId === target.parentId &&
+      current.branch === target.branch &&
+      current.index === target.index
         ? current
         : target,
     );
@@ -1548,13 +1809,15 @@ export function ExperimentModal({
     if (drag.from === "palette") {
       if (isStatement(drag.kind)) {
         setBlocks((current) =>
-          insertBlock(current, target.parentId, target.index, createBlock(drag.kind)),
+          insertBlock(current, target.parentId, target.branch, target.index, createBlock(drag.kind)),
         );
       }
       return;
     }
     if (drag.from === "canvas") {
-      setBlocks((current) => moveBlock(current, drag.id, target.parentId, target.index));
+      setBlocks((current) =>
+        moveBlock(current, drag.id, target.parentId, target.branch, target.index),
+      );
     }
   };
 
@@ -1574,8 +1837,15 @@ export function ExperimentModal({
   const dropCondition = (blockId: string) => {
     const drag = dragRef.current;
     resetDrag();
+    const ref = booleanRefOf(drag);
     if (drag?.from === "palette" && drag.kind === "compare") {
       setBlocks((current) => setCondition(current, blockId, emptyCondition()));
+    } else if (ref && drag?.from === "palette") {
+      setBlocks((current) => setCondition(current, blockId, { ref }));
+    } else if (ref && drag?.from === "slot") {
+      setBlocks((current) =>
+        setCondition(clearSlot(current, drag.blockId, drag.key), blockId, { ref }),
+      );
     } else if (drag?.from === "cond" && drag.blockId !== blockId) {
       setBlocks((current) => {
         const moving = findBlock(current, drag.blockId)?.condition ?? null;
@@ -1609,6 +1879,9 @@ export function ExperimentModal({
     dropValue,
     dropCondition,
     setOp: (blockId, op) => setBlocks((current) => setCompareOp(current, blockId, op)),
+    toggleElse: (blockId) => setBlocks((current) => toggleElse(current, blockId)),
+    addCase: (blockId) => setBlocks((current) => addCase(current, blockId)),
+    removeCase: (blockId, caseId) => setBlocks((current) => removeCase(current, blockId, caseId)),
   };
 
   const handlers: NodeHandlers = {
@@ -1856,11 +2129,11 @@ export function ExperimentModal({
                   return;
                 }
                 event.preventDefault();
-                hoverTarget({ parentId: null, index: blocksRef.current.length });
+                hoverTarget({ parentId: null, branch: BODY, index: blocksRef.current.length });
               }}
               onDrop={(event) => {
                 event.preventDefault();
-                applyDrop(hover ?? { parentId: null, index: blocks.length });
+                applyDrop(hover ?? { parentId: null, branch: BODY, index: blocks.length });
               }}
               onDragLeave={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -1872,7 +2145,7 @@ export function ExperimentModal({
                 className="inline-flex min-h-[150%] min-w-[150%] flex-col items-start pt-[90px] pr-16 pb-40 pl-[136px]"
                 style={{ transform: `scale(${zoom})`, transformOrigin: "0 0", gap: STACK_GAP }}
               >
-                <Stack blocks={blocks} parentId={null} {...handlers} />
+                <Stack blocks={blocks} parentId={null} branch={BODY} {...handlers} />
               </div>
               {blocks.length === 0 && !hover ? (
                 <p className="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-slate-400">

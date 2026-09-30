@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ExperimentBlock } from "../lib/experiment";
+import { branchesOf, type ExperimentBlock } from "../lib/experiment";
 import { compileProgram, formatDuration } from "../lib/programCompiler";
 import type { LibraryProgram } from "../lib/storage";
 
 function countBlocks(blocks: ExperimentBlock[]): number {
-  return blocks.reduce((total, block) => total + 1 + countBlocks(block.children ?? []), 0);
+  return blocks.reduce(
+    (total, block) =>
+      total + 1 + branchesOf(block).reduce((sum, branch) => sum + countBlocks(branch.blocks), 0),
+    0,
+  );
 }
 
 function describe(item: LibraryProgram) {

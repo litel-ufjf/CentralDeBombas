@@ -70,6 +70,46 @@ export function statementPath(
   ].join(" ");
 }
 
+/** Braço de um bloco em C: espaço interno seguido da barra abaixo dele. */
+export type CSection = { innerH: number; barW: number; barH: number };
+
+/** Bloco em C com um ou mais braços (senão, casos); a última barra é a base do bloco. */
+export function multiCPath(topW: number, topH: number, sections: CSection[], m: BlockMetrics) {
+  const r = m.radius;
+  const nx = m.notchX;
+  const arm = m.armW;
+  const parts = [
+    `M 0,${r}`,
+    arc(r, r, -r),
+    `H ${nx} ${notchRight(m)}`,
+    `H ${topW - r}`,
+    arc(r, r, r),
+    `V ${topH - r}`,
+    arc(r, -r, r),
+  ];
+  let y = topH;
+  for (const section of sections) {
+    const ri = Math.min(r, section.innerH / 2);
+    const rb = Math.min(r, section.barH / 2);
+    const innerBottom = y + section.innerH;
+    parts.push(
+      `H ${arm + nx + m.notchW} ${notchLeft(m)}`,
+      `H ${arm + ri}`,
+      arc(ri, -ri, ri, 0),
+      `V ${innerBottom - ri}`,
+      arc(ri, ri, ri, 0),
+      `H ${arm + nx} ${notchRight(m)}`,
+      `H ${section.barW - rb}`,
+      arc(rb, rb, rb),
+      `V ${innerBottom + section.barH - rb}`,
+      arc(rb, -rb, rb),
+    );
+    y = innerBottom + section.barH;
+  }
+  parts.push(`H ${nx + m.notchW} ${notchLeft(m)}`, `H ${r}`, arc(r, -r, -r), "Z");
+  return parts.join(" ");
+}
+
 /** Bloco em C (laços e condições): barra superior, braço esquerdo e barra inferior. */
 export function cBlockPath(
   topW: number,
@@ -78,35 +118,7 @@ export function cBlockPath(
   bottomW: number,
   m: BlockMetrics,
 ) {
-  const r = m.radius;
-  const nx = m.notchX;
-  const arm = m.armW;
-  const ri = Math.min(r, innerH / 2);
-  const yInnerBottom = topH + innerH;
-  const total = yInnerBottom + m.bottomH;
-  return [
-    `M 0,${r}`,
-    arc(r, r, -r),
-    `H ${nx} ${notchRight(m)}`,
-    `H ${topW - r}`,
-    arc(r, r, r),
-    `V ${topH - r}`,
-    arc(r, -r, r),
-    `H ${arm + nx + m.notchW} ${notchLeft(m)}`,
-    `H ${arm + ri}`,
-    arc(ri, -ri, ri, 0),
-    `V ${yInnerBottom - ri}`,
-    arc(ri, ri, ri, 0),
-    `H ${arm + nx} ${notchRight(m)}`,
-    `H ${bottomW - r}`,
-    arc(r, r, r),
-    `V ${total - r}`,
-    arc(r, -r, r),
-    `H ${nx + m.notchW} ${notchLeft(m)}`,
-    `H ${r}`,
-    arc(r, -r, -r),
-    "Z",
-  ].join(" ");
+  return multiCPath(topW, topH, [{ innerH, barW: bottomW, barH: m.bottomH }], m);
 }
 
 export const OUTPUT_TAB_W = 6;

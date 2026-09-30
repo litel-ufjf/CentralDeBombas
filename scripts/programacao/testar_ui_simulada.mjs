@@ -38,7 +38,7 @@ const fakeBoard = `(() => {
     const id = Number(parts[1]);
     const p = programs[id];
     switch (parts[0]) {
-      case "H": emit("H,BOMBA,6,12,PROG1,PROG2"); break;
+      case "H": emit("H,BOMBA,6,12,PROG1,PROG2,PROG3"); break;
       case "T": clockOffset = Number(parts[1]) - Date.now(); emit("T," + parts[1]); break;
       case "G":
         emit(stateLine());
@@ -436,9 +436,20 @@ try {
   check("botão desfazer habilitado", await run(`!document.querySelector('[aria-label="Desfazer (Ctrl+Z)"]').disabled`));
 
   const setFlow = { id: "f1", kind: "setFlow", fields: { flow: { ref: "varFlow" } } };
+  const flow = (id, value) => ({ id, kind: "setFlow", fields: { flow: value } });
   const programs = [null, null,
     { name: "Condição nova", docId: null, blocks: [{ id: "w1", kind: "while", fields: {}, condition: { left: { ref: "varTime" }, op: "<", right: 60 }, children: [setFlow] }] },
     [{ id: "w2", kind: "while", fields: { threshold: 5 }, children: [{ id: "f2", kind: "setFlow", fields: { flow: 20 } }] }],
+    { name: "Se senão", docId: null, blocks: [
+      { id: "i1", kind: "if", fields: {}, condition: { ref: "varDir" }, children: [flow("f3", 10)], elseChildren: [flow("f4", 20)] },
+      { id: "i2", kind: "if", fields: {}, condition: { left: { ref: "varDir" }, op: "!=", right: 1 }, children: [{ id: "v1", kind: "invert", fields: {} }] },
+    ] },
+    { name: "Escolha", docId: null, blocks: [
+      { id: "s1", kind: "switch", fields: { value: { ref: "varDir" } }, cases: [
+        { id: "c1", match: 1, children: [flow("f5", 10)] },
+        { id: "c0", match: 0, children: [flow("f6", 20)] },
+      ], elseChildren: [{ id: "p1", kind: "pause", fields: { seconds: 5 } }] },
+    ] },
   ];
   const inject = await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `if (!sessionStorage.getItem("injetado")) {
@@ -446,9 +457,13 @@ try {
       localStorage.setItem("bomba.experiment.v1", ${JSON.stringify(JSON.stringify(programs))});
     }`,
   });
+  const caseRows = () =>
+    run(`[...${editor}.querySelectorAll("div")].filter((d) => d.childNodes[0]?.textContent?.trim() === "caso").length`);
   for (const [pump, expected, label] of [
-    [3, "PI,3,0,H,2,<,@T,60,-", "condição com tempo envia H,<,@T,60"],
-    [4, "PI,4,0,H,2,>,5,-,-", "programa antigo segue no formato PROG1"],
+    [3, ["PI,3,0,H,2,<,@T,60,-"], "condição com tempo envia H,<,@T,60"],
+    [4, ["PI,4,0,H,2,>,5,-,-"], "programa antigo segue no formato PROG1"],
+    [5, ["PI,5,0,C,2,!,@D,0,-", "PI,5,2,N,4,-,-,-,-", "PI,5,4,E,0,-,-,-,-", "PI,5,5,C,7,!,@D,1,-"], "se/senão com Sentido e ≠ envia C, N e E"],
+    [6, ["PI,6,0,C,2,=,@D,1,-", "PI,6,2,N,8,-,-,-,-", "PI,6,3,C,5,=,@D,0,-", "PI,6,6,W,-1,-,5,-,-", "PI,6,7,E,3,-,-,-,-", "PI,6,8,E,0,-,-,-,-"], "escolha/caso vira cadeia de C = com N"],
   ]) {
     await run(`location.hash = "#/bomba/${pump}"`);
     await send("Page.reload");
@@ -457,11 +472,41 @@ try {
     await sleep(900);
     await click("Programar experimento");
     await sleep(700);
+    if (pump >= 5) {
+      await run(`document.querySelector('[aria-label="Expandir"]')?.click()`);
+      await sleep(400);
+      await shot(`${pump === 5 ? "13_se_senao" : "14_escolha_caso"}.png`);
+      await run(`document.querySelector('[aria-label="Restaurar tamanho"]')?.click()`);
+      await sleep(200);
+    }
+    if (pump === 6) {
+      const rows = await caseRows();
+      check("+ caso acrescenta um caso", (await click("+ caso", editor)) && (await caseRows()) === rows + 1, `${rows}`);
+      await key("z");
+      await sleep(200);
+      check("Ctrl+Z desfaz o caso", (await caseRows()) === rows);
+    }
+    if (pump === 5) {
+      const elseBars = () =>
+        run(`[...${editor}.querySelectorAll("div.whitespace-nowrap")].filter((d) => d.childNodes[0]?.textContent?.trim() === "senão" && d.querySelector("button")).length`);
+      const removeElse = await run(`(() => {
+        const b = ${editor}.querySelector('button[aria-label^="Remover o braço"]');
+        b?.click();
+        return Boolean(b);
+      })()`);
+      await sleep(200);
+      check("× remove o senão", removeElse && (await elseBars()) === 0);
+      check("+ senão devolve o braço", (await click("+ senão", editor)) && (await elseBars()) === 1);
+      await key("z");
+      await key("z");
+      await sleep(200);
+      check("desfaz volta ao senão original", (await elseBars()) === 1);
+    }
     mark = await sentCount();
     await click("Executar agora", footer);
     await sleep(900);
     const lines = await sentSince(mark);
-    check(label, lines.includes(expected), lines.filter((l) => l.startsWith("PI")).join(" | "));
+    check(label, expected.every((line) => lines.includes(line)), lines.filter((l) => l.startsWith("PI")).join(" | "));
     await click("Parar", footer);
     await sleep(200);
     await click("Parar", dialog);

@@ -6,6 +6,8 @@ export type BlockKind =
   | "while"
   | "for"
   | "if"
+  | "ifElse"
+  | "switch"
   | "setFlow"
   | "invert"
   | "pause"
@@ -15,24 +17,37 @@ export type BlockKind =
   | "compare"
   | "varFlow"
   | "varTime"
-  | "varVolume";
+  | "varVolume"
+  | "varDir";
 
-export type IoRef = "varFlow" | "varTime" | "varVolume";
+export type IoRef = "varFlow" | "varTime" | "varVolume" | "varDir";
 export type FieldValue = number | { ref: IoRef };
 
-export type CompareOp = ">" | ">=" | "<" | "<=";
+export type CompareOp = ">" | ">=" | "<" | "<=" | "==" | "!=";
 
 export const COMPARE_OPS: { op: CompareOp; label: string }[] = [
   { op: ">", label: ">" },
   { op: ">=", label: "≥" },
   { op: "<", label: "<" },
   { op: "<=", label: "≤" },
+  { op: "==", label: "=" },
+  { op: "!=", label: "≠" },
 ];
 
-export type Condition = { left: FieldValue; op: CompareOp; right: FieldValue };
+export type Comparison = { left: FieldValue; op: CompareOp; right: FieldValue };
+/** Condição de Enquanto/Se: uma comparação ou uma variável usada como booleano (≠ 0). */
+export type Condition = Comparison | { ref: IoRef };
+
+export type SwitchCase = { id: string; match: FieldValue; children: ExperimentBlock[] };
 
 export const COND_LEFT = "cond.left";
 export const COND_RIGHT = "cond.right";
+export const BODY = "body";
+export const ELSE = "else";
+
+export function caseKey(caseId: string) {
+  return `case:${caseId}`;
+}
 
 export type ExperimentBlock = {
   id: string;
@@ -40,6 +55,8 @@ export type ExperimentBlock = {
   fields: Record<string, FieldValue>;
   condition?: Condition | null;
   children?: ExperimentBlock[];
+  elseChildren?: ExperimentBlock[];
+  cases?: SwitchCase[];
 };
 
 export type PaletteItem = {
@@ -56,6 +73,8 @@ export const PALETTE: { title: string; category: BlockCategory; items: PaletteIt
       { kind: "while", category: "logic", label: "Enquanto" },
       { kind: "for", category: "logic", label: "Para" },
       { kind: "if", category: "logic", label: "Se" },
+      { kind: "ifElse", category: "logic", label: "Se / senão" },
+      { kind: "switch", category: "logic", label: "Escolha / caso" },
     ],
   },
   {
@@ -88,6 +107,7 @@ export const PALETTE: { title: string; category: BlockCategory; items: PaletteIt
       { kind: "varFlow", category: "io", label: "Vazão Atual" },
       { kind: "varTime", category: "io", label: "Tempo Decorrido" },
       { kind: "varVolume", category: "io", label: "Volume Total" },
+      { kind: "varDir", category: "io", label: "Sentido" },
     ],
   },
 ];
@@ -104,6 +124,8 @@ export const REPORTER_HINT: Record<IoRef, string> = {
   varFlow: "Vazão atual do programa, em mL/min",
   varTime: "Tempo desde o início do programa, em segundos",
   varVolume: "Volume bombeado desde o início do programa, em mL",
+  varDir:
+    "Sentido de rotação: 1 (verdadeiro) no direto, 0 (falso) no reverso. Em um campo numérico vale 1 ou 0; no espaço de condição de Enquanto/Se vale verdadeiro ou falso",
 };
 
 const KIND_META: Record<
@@ -113,6 +135,8 @@ const KIND_META: Record<
   while: { category: "logic", fields: {} },
   for: { category: "logic", fields: { times: 3 } },
   if: { category: "logic", fields: {} },
+  ifElse: { category: "logic", fields: {} },
+  switch: { category: "logic", fields: { value: 0 } },
   setFlow: { category: "action", fields: { flow: 20 } },
   invert: { category: "action", fields: {} },
   pause: { category: "action", fields: { seconds: 10 } },
@@ -123,19 +147,26 @@ const KIND_META: Record<
   varFlow: { category: "io", fields: {} },
   varTime: { category: "io", fields: {} },
   varVolume: { category: "io", fields: {} },
+  varDir: { category: "io", fields: {} },
 };
-
 
 export function kindCategory(kind: BlockKind): BlockCategory {
   return KIND_META[kind].category;
 }
 
 export function isContainer(kind: BlockKind) {
-  return kind === "while" || kind === "for" || kind === "if";
+  return (
+    kind === "while" || kind === "for" || kind === "if" || kind === "ifElse" || kind === "switch"
+  );
 }
 
 export function isReporter(kind: BlockKind): kind is IoRef {
-  return kind === "varFlow" || kind === "varTime" || kind === "varVolume";
+  return kind === "varFlow" || kind === "varTime" || kind === "varVolume" || kind === "varDir";
+}
+
+/** Variáveis que também valem como condição sozinhas (verdadeiro/falso). */
+export function isBooleanRef(ref: IoRef) {
+  return ref === "varDir";
 }
 
 export function hasCondition(kind: BlockKind) {
@@ -146,28 +177,47 @@ export function isStatement(kind: BlockKind) {
   return !isReporter(kind) && kind !== "compare";
 }
 
-export function emptyCondition(): Condition {
+export function isComparison(condition: Condition): condition is Comparison {
+  return "op" in condition;
+}
+
+export function emptyCondition(): Comparison {
   return { left: 0, op: ">", right: 0 };
 }
 
-function defaultCondition(kind: BlockKind): Condition | undefined {
+function defaultCondition(kind: BlockKind): Comparison | undefined {
   if (kind === "while") {
     return { left: { ref: "varFlow" }, op: ">", right: 0 };
   }
-  if (kind === "if") {
+  if (kind === "if" || kind === "ifElse") {
     return { left: { ref: "varFlow" }, op: ">=", right: 10 };
   }
   return undefined;
 }
 
+export function newCase(match: FieldValue = 0): SwitchCase {
+  return { id: newId(), match, children: [] };
+}
+
 export function createBlock(kind: BlockKind): ExperimentBlock {
+  if (kind === "ifElse") {
+    return { ...createBlock("if"), elseChildren: [] };
+  }
   const meta = KIND_META[kind];
   const block: ExperimentBlock = {
     id: newId(),
     kind,
     fields: { ...meta.fields },
-    children: isContainer(kind) ? [] : undefined,
   };
+  if (kind === "switch") {
+    block.fields.value = { ref: "varDir" };
+    block.cases = [newCase(1), newCase(0)];
+    block.elseChildren = [];
+    return block;
+  }
+  if (isContainer(kind)) {
+    block.children = [];
+  }
   if (hasCondition(kind)) {
     block.condition = defaultCondition(kind);
   }
@@ -175,11 +225,15 @@ export function createBlock(kind: BlockKind): ExperimentBlock {
 }
 
 export function slotValue(block: ExperimentBlock, key: string): FieldValue | undefined {
-  if (key === COND_LEFT) {
-    return block.condition?.left;
+  if (key === COND_LEFT || key === COND_RIGHT) {
+    const condition = block.condition;
+    if (!condition || !isComparison(condition)) {
+      return undefined;
+    }
+    return key === COND_LEFT ? condition.left : condition.right;
   }
-  if (key === COND_RIGHT) {
-    return block.condition?.right;
+  if (key.startsWith("case:")) {
+    return block.cases?.find((item) => caseKey(item.id) === key)?.match;
   }
   return block.fields[key];
 }
@@ -187,6 +241,56 @@ export function slotValue(block: ExperimentBlock, key: string): FieldValue | und
 /** Valor numérico que o campo volta a ter quando a variável é retirada dele. */
 export function defaultSlotValue(block: ExperimentBlock, key: string): number {
   return KIND_META[block.kind].fields[key] ?? 0;
+}
+
+/** Braços de um bloco-contêiner, na ordem em que aparecem. */
+export function branchesOf(block: ExperimentBlock): { key: string; blocks: ExperimentBlock[] }[] {
+  const list: { key: string; blocks: ExperimentBlock[] }[] = [];
+  if (block.kind === "switch") {
+    for (const item of block.cases ?? []) {
+      list.push({ key: caseKey(item.id), blocks: item.children });
+    }
+    list.push({ key: ELSE, blocks: block.elseChildren ?? [] });
+    return list;
+  }
+  if (block.children) {
+    list.push({ key: BODY, blocks: block.children });
+  }
+  if (block.elseChildren) {
+    list.push({ key: ELSE, blocks: block.elseChildren });
+  }
+  return list;
+}
+
+export function withBranch(
+  block: ExperimentBlock,
+  key: string,
+  blocks: ExperimentBlock[],
+): ExperimentBlock {
+  if (key === BODY) {
+    return { ...block, children: blocks };
+  }
+  if (key === ELSE) {
+    return { ...block, elseChildren: blocks };
+  }
+  return {
+    ...block,
+    cases: block.cases?.map((item) => (caseKey(item.id) === key ? { ...item, children: blocks } : item)),
+  };
+}
+
+function mapBranches(
+  block: ExperimentBlock,
+  map: (blocks: ExperimentBlock[]) => ExperimentBlock[],
+): ExperimentBlock {
+  let next = block;
+  for (const branch of branchesOf(block)) {
+    const mapped = map(branch.blocks);
+    if (mapped !== branch.blocks) {
+      next = withBranch(next, branch.key, mapped);
+    }
+  }
+  return next;
 }
 
 export function createDefaultProgram(): ExperimentBlock[] {
@@ -203,19 +307,22 @@ export function cloneBlock(block: ExperimentBlock): ExperimentBlock {
     fields: { ...block.fields },
     condition: block.condition ? { ...block.condition } : block.condition,
     children: block.children?.map(cloneBlock),
+    elseChildren: block.elseChildren?.map(cloneBlock),
+    cases: block.cases?.map((item) => ({
+      id: newId(),
+      match: item.match,
+      children: item.children.map(cloneBlock),
+    })),
   };
 }
 
-export function findBlock(
-  blocks: ExperimentBlock[],
-  id: string,
-): ExperimentBlock | null {
+export function findBlock(blocks: ExperimentBlock[], id: string): ExperimentBlock | null {
   for (const block of blocks) {
     if (block.id === id) {
       return block;
     }
-    if (block.children) {
-      const nested = findBlock(block.children, id);
+    for (const branch of branchesOf(block)) {
+      const nested = findBlock(branch.blocks, id);
       if (nested) {
         return nested;
       }
@@ -224,18 +331,21 @@ export function findBlock(
   return null;
 }
 
+export type BlockLocation = { parentId: string | null; branch: string; index: number };
+
 export function locateBlock(
   blocks: ExperimentBlock[],
   id: string,
   parentId: string | null = null,
-): { parentId: string | null; index: number } | null {
+  branch = BODY,
+): BlockLocation | null {
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index];
     if (block.id === id) {
-      return { parentId, index };
+      return { parentId, branch, index };
     }
-    if (block.children) {
-      const nested = locateBlock(block.children, id, block.id);
+    for (const item of branchesOf(block)) {
+      const nested = locateBlock(item.blocks, id, block.id, item.key);
       if (nested) {
         return nested;
       }
@@ -248,66 +358,63 @@ export function containsId(block: ExperimentBlock, id: string): boolean {
   if (block.id === id) {
     return true;
   }
-  return Boolean(block.children?.some((child) => containsId(child, id)));
+  return branchesOf(block).some((branch) => branch.blocks.some((child) => containsId(child, id)));
 }
 
 export function removeBlock(
   blocks: ExperimentBlock[],
   id: string,
 ): { next: ExperimentBlock[]; removed: ExperimentBlock | null } {
-  const next: ExperimentBlock[] = [];
   let removed: ExperimentBlock | null = null;
-  for (const block of blocks) {
-    if (block.id === id) {
-      removed = block;
-      continue;
-    }
-    if (block.children) {
-      const nested = removeBlock(block.children, id);
-      if (nested.removed) {
-        removed = nested.removed;
-        next.push({ ...block, children: nested.next });
+  const prune = (list: ExperimentBlock[]): ExperimentBlock[] => {
+    let changed = false;
+    const next: ExperimentBlock[] = [];
+    for (const block of list) {
+      if (block.id === id) {
+        removed = block;
+        changed = true;
         continue;
       }
+      const mapped = mapBranches(block, prune);
+      changed ||= mapped !== block;
+      next.push(mapped);
     }
-    next.push(block);
-  }
-  return { next, removed };
+    return changed ? next : list;
+  };
+  return { next: prune(blocks), removed };
 }
 
 export function insertBlock(
   blocks: ExperimentBlock[],
   parentId: string | null,
+  branch: string,
   index: number,
   incoming: ExperimentBlock,
 ): ExperimentBlock[] {
-  if (parentId === null) {
-    const copy = blocks.slice();
-    const at = Math.max(0, Math.min(index, copy.length));
-    copy.splice(at, 0, incoming);
+  const splice = (list: ExperimentBlock[]) => {
+    const copy = list.slice();
+    copy.splice(Math.max(0, Math.min(index, copy.length)), 0, incoming);
     return copy;
+  };
+  if (parentId === null) {
+    return splice(blocks);
   }
-  return blocks.map((block) => {
-    if (block.id === parentId && isContainer(block.kind)) {
-      const children = (block.children ?? []).slice();
-      const at = Math.max(0, Math.min(index, children.length));
-      children.splice(at, 0, incoming);
-      return { ...block, children };
-    }
-    if (block.children) {
-      return {
-        ...block,
-        children: insertBlock(block.children, parentId, index, incoming),
-      };
-    }
-    return block;
-  });
+  const visit = (list: ExperimentBlock[]): ExperimentBlock[] =>
+    list.map((block) => {
+      if (block.id === parentId && isContainer(block.kind)) {
+        const target = branchesOf(block).find((item) => item.key === branch);
+        return target ? withBranch(block, branch, splice(target.blocks)) : block;
+      }
+      return mapBranches(block, visit);
+    });
+  return visit(blocks);
 }
 
 export function moveBlock(
   blocks: ExperimentBlock[],
   id: string,
   parentId: string | null,
+  branch: string,
   index: number,
 ): ExperimentBlock[] {
   const origin = locateBlock(blocks, id);
@@ -318,9 +425,10 @@ export function moveBlock(
   if (parentId && containsId(pulled.removed, parentId)) {
     return blocks;
   }
-  const at =
-    origin && origin.parentId === parentId && origin.index < index ? index - 1 : index;
-  return insertBlock(pulled.next, parentId, at, pulled.removed);
+  const sameList =
+    origin && origin.parentId === parentId && (parentId === null || origin.branch === branch);
+  const at = sameList && origin.index < index ? index - 1 : index;
+  return insertBlock(pulled.next, parentId, branch, at, pulled.removed);
 }
 
 export function updateBlock(
@@ -328,15 +436,16 @@ export function updateBlock(
   id: string,
   update: (block: ExperimentBlock) => ExperimentBlock,
 ): ExperimentBlock[] {
-  return blocks.map((block) => {
-    if (block.id === id) {
-      return update(block);
-    }
-    if (block.children) {
-      return { ...block, children: updateBlock(block.children, id, update) };
-    }
-    return block;
-  });
+  const visit = (list: ExperimentBlock[]): ExperimentBlock[] => {
+    let changed = false;
+    const next = list.map((block) => {
+      const mapped = block.id === id ? update(block) : mapBranches(block, visit);
+      changed ||= mapped !== block;
+      return mapped;
+    });
+    return changed ? next : list;
+  };
+  return visit(blocks);
 }
 
 export function setField(
@@ -347,11 +456,20 @@ export function setField(
 ): ExperimentBlock[] {
   return updateBlock(blocks, id, (block) => {
     if (key === COND_LEFT || key === COND_RIGHT) {
-      if (!block.condition) {
+      const condition = block.condition;
+      if (!condition || !isComparison(condition)) {
         return block;
       }
       const side = key === COND_LEFT ? "left" : "right";
-      return { ...block, condition: { ...block.condition, [side]: value } };
+      return { ...block, condition: { ...condition, [side]: value } };
+    }
+    if (key.startsWith("case:")) {
+      return {
+        ...block,
+        cases: block.cases?.map((item) =>
+          caseKey(item.id) === key ? { ...item, match: value } : item,
+        ),
+      };
     }
     return { ...block, fields: { ...block.fields, [key]: value } };
   });
@@ -378,37 +496,70 @@ export function setCompareOp(
   op: CompareOp,
 ): ExperimentBlock[] {
   return updateBlock(blocks, id, (block) =>
-    block.condition ? { ...block, condition: { ...block.condition, op } } : block,
+    block.condition && isComparison(block.condition)
+      ? { ...block, condition: { ...block.condition, op } }
+      : block,
   );
+}
+
+export function toggleElse(blocks: ExperimentBlock[], id: string): ExperimentBlock[] {
+  return updateBlock(blocks, id, (block) => {
+    if (block.kind !== "if") {
+      return block;
+    }
+    if (block.elseChildren) {
+      const { elseChildren: _removed, ...rest } = block;
+      return rest;
+    }
+    return { ...block, elseChildren: [] };
+  });
+}
+
+export function addCase(blocks: ExperimentBlock[], id: string): ExperimentBlock[] {
+  return updateBlock(blocks, id, (block) => {
+    const cases = block.cases ?? [];
+    const numbers = cases
+      .map((item) => item.match)
+      .filter((match): match is number => typeof match === "number");
+    const next = numbers.length > 0 ? Math.max(...numbers) + 1 : 0;
+    return { ...block, cases: [...cases, newCase(next)] };
+  });
+}
+
+export function removeCase(blocks: ExperimentBlock[], id: string, caseId: string): ExperimentBlock[] {
+  return updateBlock(blocks, id, (block) => ({
+    ...block,
+    cases: block.cases?.filter((item) => item.id !== caseId),
+  }));
+}
+
+function isIoRef(value: unknown): value is IoRef {
+  return value === "varFlow" || value === "varTime" || value === "varVolume" || value === "varDir";
 }
 
 function sanitizeValue(value: unknown, fallback: number): FieldValue {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
-  if (
-    value &&
-    typeof value === "object" &&
-    "ref" in value &&
-    (value.ref === "varFlow" ||
-      value.ref === "varTime" ||
-      value.ref === "varVolume")
-  ) {
+  if (value && typeof value === "object" && "ref" in value && isIoRef(value.ref)) {
     return { ref: value.ref };
   }
   return fallback;
 }
 
 function isCompareOp(value: unknown): value is CompareOp {
-  return value === ">" || value === ">=" || value === "<" || value === "<=";
+  return COMPARE_OPS.some((item) => item.op === value);
 }
 
 function sanitizeCondition(raw: Partial<ExperimentBlock>, kind: BlockKind): Condition | null {
   if (raw.condition === null) {
     return null;
   }
-  const cond = raw.condition as Partial<Condition> | undefined;
+  const cond = raw.condition as Record<string, unknown> | undefined;
   if (cond && typeof cond === "object") {
+    if (!("op" in cond) && isIoRef(cond.ref)) {
+      return { ref: cond.ref };
+    }
     return {
       left: sanitizeValue(cond.left, 0),
       op: isCompareOp(cond.op) ? cond.op : ">",
@@ -422,12 +573,19 @@ function sanitizeCondition(raw: Partial<ExperimentBlock>, kind: BlockKind): Cond
     : { ...fallback, right: sanitizeValue(legacy, fallback.right as number) };
 }
 
+function sanitizeList(value: unknown): ExperimentBlock[] {
+  return Array.isArray(value)
+    ? value.map(sanitizeBlock).filter((item): item is ExperimentBlock => Boolean(item))
+    : [];
+}
+
 function sanitizeBlock(value: unknown): ExperimentBlock | null {
   if (!value || typeof value !== "object") {
     return null;
   }
   const raw = value as Partial<ExperimentBlock>;
-  if (!raw.kind || !(raw.kind in KIND_META) || !isStatement(raw.kind as BlockKind)) {
+  const known = raw.kind && raw.kind in KIND_META && raw.kind !== "ifElse";
+  if (!known || !isStatement(raw.kind as BlockKind)) {
     return null;
   }
   const kind = raw.kind as BlockKind;
@@ -444,13 +602,22 @@ function sanitizeBlock(value: unknown): ExperimentBlock | null {
   if (hasCondition(kind)) {
     block.condition = sanitizeCondition(raw, kind);
   }
-  if (isContainer(kind)) {
-    const children = Array.isArray(raw.children)
-      ? raw.children
-          .map(sanitizeBlock)
-          .filter((item): item is ExperimentBlock => Boolean(item))
-      : [];
-    block.children = children;
+  if (kind === "switch") {
+    const seen = new Set<string>();
+    block.cases = (Array.isArray(raw.cases) ? raw.cases : []).flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const id = typeof item.id === "string" && item.id && !seen.has(item.id) ? item.id : newId();
+      seen.add(id);
+      return [{ id, match: sanitizeValue(item.match, 0), children: sanitizeList(item.children) }];
+    });
+    block.elseChildren = sanitizeList(raw.elseChildren);
+  } else if (isContainer(kind)) {
+    block.children = sanitizeList(raw.children);
+    if (kind === "if" && Array.isArray(raw.elseChildren)) {
+      block.elseChildren = sanitizeList(raw.elseChildren);
+    }
   }
   return block;
 }
@@ -459,10 +626,7 @@ export function sanitizeProgram(value: unknown): ExperimentBlock[] {
   if (!Array.isArray(value)) {
     return createDefaultProgram();
   }
-  const blocks = value
-    .map(sanitizeBlock)
-    .filter((item): item is ExperimentBlock => Boolean(item));
-  return blocks;
+  return sanitizeList(value);
 }
 
 export function reporterLabel(kind: IoRef) {
@@ -471,6 +635,9 @@ export function reporterLabel(kind: IoRef) {
   }
   if (kind === "varTime") {
     return "Tempo Decorrido";
+  }
+  if (kind === "varDir") {
+    return "Sentido";
   }
   return "Volume Total";
 }

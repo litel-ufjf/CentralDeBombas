@@ -10,7 +10,8 @@ export type ParsedHello = {
   motors: number;
   bits: number;
   programs: boolean;
-  conditions: boolean;
+  /** Maior n dos tokens PROGn anunciados (0 sem suporte a programas). */
+  programLevel: number;
 };
 
 export type ParsedState = {
@@ -110,7 +111,10 @@ export function parseLine(raw: string): ParsedLine | null {
       motors: Number(parts[2] || MOTOR_COUNT),
       bits: Number(parts[3] || 12),
       programs: parts.slice(4).includes("PROG1"),
-      conditions: parts.slice(4).includes("PROG2"),
+      programLevel: Math.max(
+        0,
+        ...parts.slice(4).map((token) => (/^PROG\d+$/.test(token) ? Number(token.slice(4)) : 0)),
+      ),
     };
   }
 

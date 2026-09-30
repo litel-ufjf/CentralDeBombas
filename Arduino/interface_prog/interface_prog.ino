@@ -3,8 +3,10 @@
 //   T,<epoch_ms>                       acerta o relógio com o horário do computador
 //   PB,<id>,<n>,<aF>,<p0F>,<aR>,<p0R>  começa a receber um programa de n instruções
 //   PI,<id>,<i>,<op>,<salto>,<cmp>,<a>,<b>,<c>  instrução i do programa
-//     operandos: número, @F (vazão), @T (tempo em s), @V (volume em mL) ou - (vazio)
-//     H/C: cmp é > G(≥) < L(≤); "a" sozinho compara a vazão com a (PROG1), "a,b" compara a com b (PROG2)
+//     operandos: número, @F (vazão), @T (tempo em s), @V (volume em mL), @D (sentido: 1 direto, 0 reverso) ou - (vazio)
+//     H/C: cmp é > G(≥) < L(≤) = !(≠); "a" sozinho compara a vazão com a (PROG1), "a,b" compara a com b (PROG2)
+//     N: senão (PROG3). C salta para o N, que salta para o E: C cond → então… N → senão… E
+// PROG3 acrescenta = e ≠, @D e N.
 //   PS,<id>,<inicio_epoch_ms>          executa (0 = agora) ou agenda para o horário
 //   PP,<id>,<1|0>                      pausa (1) ou retoma (0)
 //   PX,<id>                            para o programa da bomba
@@ -23,6 +25,7 @@ const int MOTOR_COUNT = 6;
 const unsigned long CMD_TIMEOUT_MS = 5000;
 const unsigned long RUN_REPORT_MS = 500;
 const int STEPS_PER_TICK = 64;
+const float EQUAL_EPS = 0.0005f;  // a UI arredonda os números a 3 casas
 
 // STBY das pontes amarrado em 3,3 V (GPIO 4 é IN2 da M5 e 32 é IN1 da M2).
 struct MotorPins {
@@ -131,7 +134,7 @@ void printState() {
 }
 
 void printHello() {
-  Serial.println("H,BOMBA,6,12,PROG1,PROG2");
+  Serial.println("H,BOMBA,6,12,PROG1,PROG2,PROG3");
 }
 
 void printError(const char* message) {
@@ -188,6 +191,8 @@ float evalOperand(const Program& p, const Operand& operand) {
       return (float)(p.runMs / 1000.0);
     case 'V':
       return (float)p.volumeMl;
+    case 'D':
+      return p.forward ? 1.0f : 0.0f;
     default:
       return operand.value;
   }
@@ -198,10 +203,13 @@ bool conditionHolds(const Program& p, const Instr& in) {
   bool single = in.arg[1].ref == '-';
   float left = single ? p.flow : evalOperand(p, in.arg[0]);
   float right = evalOperand(p, single ? in.arg[0] : in.arg[1]);
+  bool equal = fabsf(left - right) <= EQUAL_EPS;
   switch (in.cmp) {
     case 'G': return left >= right;
     case '<': return left < right;
     case 'L': return left <= right;
+    case '=': return equal;
+    case '!': return !equal;
     default: return left > right;
   }
 }
@@ -328,6 +336,10 @@ void stepProgram(int index) {
         p.pc = conditionHolds(p, in) ? p.pc + 1 : in.jump + 1;
         break;
 
+      case OP_ELSE:
+        p.pc = in.jump + 1;
+        break;
+
       case OP_END: {
         const Instr& open = p.code[in.jump];
         if (open.op == OP_FOR) {
@@ -401,7 +413,7 @@ bool parseOperand(const char* token, Operand& out) {
     return true;
   }
   if (token[0] == '@') {
-    if (token[1] != 'F' && token[1] != 'T' && token[1] != 'V') {
+    if (token[1] != 'F' && token[1] != 'T' && token[1] != 'V' && token[1] != 'D') {
       return false;
     }
     out.ref = token[1];
@@ -423,6 +435,7 @@ int opFromCode(char code) {
     case 'H': return OP_WHILE;
     case 'C': return OP_IF;
     case 'E': return OP_END;
+    case 'N': return OP_ELSE;
   }
   return -1;
 }
@@ -434,14 +447,25 @@ bool programIsValid(const Program& p) {
   for (int i = 0; i < p.count; i++) {
     const Instr& in = p.code[i];
     bool opener = in.op == OP_FOR || in.op == OP_WHILE || in.op == OP_IF;
-    if (opener || in.op == OP_END) {
-      if (in.jump < 0 || in.jump >= p.count) {
+    if (!opener && in.op != OP_END && in.op != OP_ELSE) {
+      continue;
+    }
+    if (in.jump <= (in.op == OP_END ? -1 : i) || in.jump >= p.count) {
+      return false;
+    }
+    int end = in.jump;
+    // Um C com senão salta para o N, e o N para o E que fecha o C.
+    if (in.op == OP_IF && p.code[end].op == OP_ELSE) {
+      end = p.code[end].jump;
+      if (end <= in.jump || end >= p.count) {
         return false;
       }
-      const Instr& pair = p.code[in.jump];
-      if (opener && (pair.op != OP_END || pair.jump != i)) {
-        return false;
-      }
+    }
+    if (opener && (p.code[end].op != OP_END || p.code[end].jump != i)) {
+      return false;
+    }
+    if (in.op == OP_ELSE && p.code[end].op != OP_END) {
+      return false;
     }
   }
   return true;

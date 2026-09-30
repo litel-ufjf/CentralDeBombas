@@ -1,10 +1,12 @@
 import type { Calibration } from "./calibration";
 import {
+  isComparison,
   isStatement,
   type CompareOp,
   type Condition,
   type ExperimentBlock,
   type FieldValue,
+  type SwitchCase,
 } from "./experiment";
 
 export const MAX_INSTRUCTIONS = 128;
@@ -12,15 +14,15 @@ export const MAX_INSTRUCTIONS = 128;
 export type Instruction = {
   op: string;
   jump: number;
-  cmp: ">" | "G" | "<" | "L" | "-";
+  cmp: ">" | "G" | "<" | "L" | "=" | "!" | "-";
   args: [string, string, string];
 };
 
 export type CompiledProgram = {
   instructions: Instruction[];
   estimatedSeconds: number | null;
-  /** Usa comparações que só o firmware com PROG2 entende. */
-  needsConditions: boolean;
+  /** Versão mínima do protocolo de programas (PROGn) que a placa precisa anunciar. */
+  firmwareLevel: number;
 };
 
 const CMP_CODE: Record<CompareOp, Instruction["cmp"]> = {
@@ -28,7 +30,11 @@ const CMP_CODE: Record<CompareOp, Instruction["cmp"]> = {
   ">=": "G",
   "<": "<",
   "<=": "L",
+  "==": "=",
+  "!=": "!",
 };
+
+const REF_CODE = { varFlow: "@F", varTime: "@T", varVolume: "@V", varDir: "@D" } as const;
 
 export class ProgramCompileError extends Error {}
 
@@ -39,13 +45,7 @@ function operand(value: FieldValue | undefined): string {
     return "0";
   }
   if (typeof value === "object") {
-    if (value.ref === "varFlow") {
-      return "@F";
-    }
-    if (value.ref === "varTime") {
-      return "@T";
-    }
-    return "@V";
+    return REF_CODE[value.ref];
   }
   if (!Number.isFinite(value)) {
     return "0";
@@ -72,22 +72,57 @@ function emit(
   return out.length - 1;
 }
 
-type CompileState = { out: Instruction[]; needsConditions: boolean };
-
-function conditionArgs(condition: Condition, state: CompileState) {
+function conditionInstr(condition: Condition): { args: string[]; cmp: Instruction["cmp"] } {
+  if (!isComparison(condition)) {
+    return { args: [operand(condition), "0"], cmp: "!" };
+  }
   const flowOnLeft =
     typeof condition.left === "object" &&
     condition.left.ref === "varFlow" &&
     (condition.op === ">" || condition.op === ">=");
-  if (flowOnLeft) {
-    return [operand(condition.right)];
-  }
-  state.needsConditions = true;
-  return [operand(condition.left), operand(condition.right)];
+  return {
+    args: flowOnLeft
+      ? [operand(condition.right)]
+      : [operand(condition.left), operand(condition.right)],
+    cmp: CMP_CODE[condition.op],
+  };
 }
 
-function compileList(blocks: ExperimentBlock[], state: CompileState): number | null {
-  const out = state.out;
+/** Duração de blocos alternativos: só é conhecida se todos os caminhos durarem o mesmo. */
+function sameDuration(values: (number | null)[]): number | null {
+  const first = values[0] ?? 0;
+  return values.every((value) => value !== null && value === first) ? first : null;
+}
+
+function compileSwitch(
+  value: FieldValue | undefined,
+  cases: SwitchCase[],
+  elseBlocks: ExperimentBlock[],
+  out: Instruction[],
+): (number | null)[] {
+  if (cases.length === 0) {
+    return [compileList(elseBlocks, out)];
+  }
+  const [first, ...rest] = cases;
+  const open = emit(out, "C", [operand(value), operand(first.match)], "=");
+  const durations = [compileList(first.children, out)];
+  if (rest.length > 0 || elseBlocks.length > 0) {
+    const otherwise = emit(out, "N");
+    out[open].jump = otherwise;
+    durations.push(...compileSwitch(value, rest, elseBlocks, out));
+    const close = emit(out, "E");
+    out[otherwise].jump = close;
+    out[close].jump = open;
+  } else {
+    const close = emit(out, "E");
+    out[open].jump = close;
+    out[close].jump = open;
+    durations.push(0);
+  }
+  return durations;
+}
+
+function compileList(blocks: ExperimentBlock[], out: Instruction[]): number | null {
   let total: number | null = 0;
   const add = (value: number | null) => {
     total = total === null || value === null ? null : total + value;
@@ -121,37 +156,43 @@ function compileList(blocks: ExperimentBlock[], state: CompileState): number | n
         emit(out, "D", [operand(f.from), operand(f.to), operand(f.duration)]);
         add(seconds(f.duration));
         break;
-      case "for":
-      case "while":
-      case "if": {
-        let open: number;
-        if (block.kind === "for") {
-          open = emit(out, "L", [operand(f.times)]);
-        } else {
-          const condition = block.condition;
-          if (!condition) {
-            throw new ProgramCompileError(
-              `O bloco “${block.kind === "while" ? "Enquanto" : "Se"}” está sem condição. Encaixe nele uma Comparação.`,
-            );
-          }
-          open = emit(
-            out,
-            block.kind === "while" ? "H" : "C",
-            conditionArgs(condition, state),
-            CMP_CODE[condition.op],
-          );
-        }
-        const inner = compileList(block.children ?? [], state);
+      case "switch":
+        add(sameDuration(compileSwitch(f.value, block.cases ?? [], block.elseChildren ?? [], out)));
+        break;
+      case "for": {
+        const open = emit(out, "L", [operand(f.times)]);
+        const inner = compileList(block.children ?? [], out);
         const close = emit(out, "E");
         out[open].jump = close;
         out[close].jump = open;
-        if (block.kind === "for") {
-          const times = seconds(f.times);
-          add(times === null || inner === null ? null : Math.round(times) * inner);
-        } else if (block.kind === "while") {
-          add(null);
+        const times = seconds(f.times);
+        add(times === null || inner === null ? null : Math.round(times) * inner);
+        break;
+      }
+      case "while":
+      case "if": {
+        const condition = block.condition;
+        if (!condition) {
+          throw new ProgramCompileError(
+            `O bloco “${block.kind === "while" ? "Enquanto" : "Se"}” está sem condição. Encaixe nele uma Comparação ou a variável Sentido.`,
+          );
+        }
+        const test = conditionInstr(condition);
+        const open = emit(out, block.kind === "while" ? "H" : "C", test.args, test.cmp);
+        const inner = compileList(block.children ?? [], out);
+        if (block.kind === "if" && block.elseChildren) {
+          const otherwise = emit(out, "N");
+          out[open].jump = otherwise;
+          const alternative = compileList(block.elseChildren, out);
+          const close = emit(out, "E");
+          out[otherwise].jump = close;
+          out[close].jump = open;
+          add(sameDuration([inner, alternative]));
         } else {
-          add(inner === 0 ? 0 : null);
+          const close = emit(out, "E");
+          out[open].jump = close;
+          out[close].jump = open;
+          add(block.kind === "while" ? null : sameDuration([inner, 0]));
         }
         break;
       }
@@ -160,10 +201,22 @@ function compileList(blocks: ExperimentBlock[], state: CompileState): number | n
   return total;
 }
 
+function firmwareLevel(instructions: Instruction[]) {
+  let level = 1;
+  for (const item of instructions) {
+    if (item.op === "N" || item.cmp === "=" || item.cmp === "!" || item.args.includes("@D")) {
+      return 3;
+    }
+    if ((item.op === "H" || item.op === "C") && item.args[1] !== NONE) {
+      level = 2;
+    }
+  }
+  return level;
+}
+
 export function compileProgram(blocks: ExperimentBlock[]): CompiledProgram {
-  const state: CompileState = { out: [], needsConditions: false };
-  const estimatedSeconds = compileList(blocks, state);
-  const instructions = state.out;
+  const instructions: Instruction[] = [];
+  const estimatedSeconds = compileList(blocks, instructions);
   if (instructions.length === 0) {
     throw new ProgramCompileError("O programa está vazio. Arraste ao menos um bloco de ação.");
   }
@@ -172,7 +225,7 @@ export function compileProgram(blocks: ExperimentBlock[]): CompiledProgram {
       `O programa tem ${instructions.length} instruções; o limite da placa é ${MAX_INSTRUCTIONS}.`,
     );
   }
-  return { instructions, estimatedSeconds, needsConditions: state.needsConditions };
+  return { instructions, estimatedSeconds, firmwareLevel: firmwareLevel(instructions) };
 }
 
 function calibField(value: number) {
