@@ -109,6 +109,36 @@ export function cBlockPath(
   ].join(" ");
 }
 
+export const OUTPUT_TAB_W = 6;
+
+/** Bloco de valor (variável): cantos arredondados e encaixe saliente à esquerda, fora da caixa. */
+export function reporterPath(w: number, h: number) {
+  const r = Math.min(4, h / 2);
+  const ty = Math.min(5, h / 4);
+  const th = Math.max(6, Math.min(14, h - ty * 2));
+  const tw = OUTPUT_TAB_W;
+  return [
+    `M ${r},0`,
+    `H ${w - r}`,
+    arc(r, r, r),
+    `V ${h - r}`,
+    arc(r, -r, r),
+    `H ${r}`,
+    arc(r, -r, -r),
+    `V ${ty + th}`,
+    `c ${-tw * 1.3},0 ${-tw * 1.3},${-th} 0,${-th}`,
+    `V ${r}`,
+    arc(r, r, -r),
+    "Z",
+  ].join(" ");
+}
+
+/** Bloco de condição: hexágono com pontas à esquerda e à direita. */
+export function booleanPath(w: number, h: number) {
+  const p = Math.min(h * 0.38, w / 2);
+  return `M ${p},0 H ${w - p} L ${w},${h / 2} L ${w - p},${h} H ${p} L 0,${h / 2} Z`;
+}
+
 /** Escurece (amount > 0) ou clareia (amount < 0) uma cor hexadecimal. */
 export function shade(hex: string, amount: number) {
   const value = hex.replace("#", "");

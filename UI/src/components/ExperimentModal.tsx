@@ -1,6 +1,8 @@
 import {
+  createContext,
   Fragment,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -13,26 +15,39 @@ import copasa from "../assets/copasa.png";
 import {
   BLOCK_MD,
   BLOCK_SM,
+  OUTPUT_TAB_W,
+  booleanPath,
   cBlockPath,
+  reporterPath,
   shade,
   statementPath,
   type BlockMetrics,
 } from "../lib/blockShapes";
 import {
   CATEGORY_COLOR,
+  COMPARE_OPS,
+  COND_LEFT,
+  COND_RIGHT,
   PALETTE,
+  REPORTER_HINT,
+  clearSlot,
   containsId,
   createBlock,
+  emptyCondition,
   findBlock,
   insertBlock,
   isContainer,
   isReporter,
+  isStatement,
   kindCategory,
   moveBlock,
   removeBlock,
   reporterLabel,
+  setCompareOp,
+  setCondition,
   setField,
   type BlockKind,
+  type CompareOp,
   type ExperimentBlock,
   type FieldValue,
   type IoRef,
@@ -91,21 +106,101 @@ function HeaderButton({
 }
 
 const BLOCK_FONT = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
-const IO_MIME = "application/x-bomba-io";
 const DURATION_OPTIONS = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300];
 const STACK_GAP = 3;
+const HISTORY_LIMIT = 200;
+const HISTORY_MERGE_MS = 1200;
+const SLOT_ACCEPT = "rgba(255,255,255,0.95)";
+const SLOT_OVER = "#ffd54a";
+
+function svgGlow(color: string | undefined) {
+  return color
+    ? { filter: `drop-shadow(0 0 1.5px ${color}) drop-shadow(0 0 1.5px ${color})` }
+    : undefined;
+}
 
 type DropTarget = { parentId: string | null; index: number };
 type DragPayload =
   | { from: "palette"; kind: BlockKind }
-  | { from: "canvas"; id: string };
+  | { from: "canvas"; id: string }
+  | { from: "slot"; blockId: string; key: string; ref: IoRef }
+  | { from: "cond"; blockId: string };
+type DragKind = "statement" | "value" | "condition";
+
+function payloadKind(payload: DragPayload | null): DragKind | null {
+  if (!payload) {
+    return null;
+  }
+  if (payload.from === "slot") {
+    return "value";
+  }
+  if (payload.from === "cond") {
+    return "condition";
+  }
+  if (payload.from === "palette") {
+    if (isReporter(payload.kind)) {
+      return "value";
+    }
+    return payload.kind === "compare" ? "condition" : "statement";
+  }
+  return "statement";
+}
+
+type SlotApi = {
+  dragKind: DragKind | null;
+  payload: () => DragPayload | null;
+  startDrag: (event: DragEvent, payload: DragPayload) => void;
+  endDrag: () => void;
+  dropValue: (blockId: string, key: string) => void;
+  dropCondition: (blockId: string) => void;
+  setOp: (blockId: string, op: CompareOp) => void;
+};
+
+const SlotContext = createContext<SlotApi | null>(null);
+
+function useSlots() {
+  const api = useContext(SlotContext);
+  if (!api) {
+    throw new Error("SlotContext ausente");
+  }
+  return api;
+}
+
+/** Aceita o arraste só quando o tipo do bloco arrastado combina com o encaixe. */
+function useSlotDrop(kind: DragKind, onDrop: () => void) {
+  const api = useSlots();
+  const [over, setOver] = useState(false);
+  const matches = () => payloadKind(api.payload()) === kind;
+  return {
+    accepting: api.dragKind === kind,
+    over,
+    props: {
+      onDragOver: (event: DragEvent) => {
+        if (matches()) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOver(true);
+        }
+      },
+      onDragLeave: (event: DragEvent) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setOver(false);
+        }
+      },
+      onDrop: (event: DragEvent) => {
+        if (matches()) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOver(false);
+          onDrop();
+        }
+      },
+    },
+  };
+}
 
 function asNumber(value: FieldValue | undefined, fallback: number) {
   return typeof value === "number" ? value : fallback;
-}
-
-function isIoRef(value: string): value is IoRef {
-  return value === "varFlow" || value === "varTime" || value === "varVolume";
 }
 
 function useBoxSize<T extends HTMLElement>() {
@@ -243,48 +338,79 @@ function CShape({
   );
 }
 
+function ReporterShape({
+  io,
+  small = false,
+  glow,
+}: {
+  io: IoRef;
+  small?: boolean;
+  glow?: string;
+}) {
+  const [ref, box] = useBoxSize<HTMLSpanElement>();
+  const color = CATEGORY_COLOR.io;
+  return (
+    <span
+      ref={ref}
+      className="relative inline-flex items-center"
+      style={{ height: small ? 23 : 26, marginLeft: OUTPUT_TAB_W }}
+    >
+      {box.w > 0 ? (
+        <svg
+          aria-hidden
+          width={box.w}
+          height={box.h}
+          className="pointer-events-none absolute top-0 left-0 overflow-visible"
+          style={svgGlow(glow)}
+        >
+          <ShapePath d={reporterPath(box.w, box.h)} color={color} />
+        </svg>
+      ) : null}
+      <span
+        className={`relative leading-none whitespace-nowrap text-white ${
+          small ? "px-[8px] text-[13.5px]" : "px-[9px] text-[14.5px]"
+        }`}
+        style={{ fontFamily: BLOCK_FONT }}
+      >
+        {reporterLabel(io)}
+      </span>
+    </span>
+  );
+}
+
 function ValueInput({
   color,
+  blockId,
+  slot,
   value,
   onChange,
 }: {
   color: string;
+  blockId: string;
+  slot: string;
   value: FieldValue | undefined;
   onChange: (next: FieldValue) => void;
 }) {
-  const allowIo = (event: DragEvent) => {
-    if (event.dataTransfer.types.includes(IO_MIME)) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
-
-  const socket = (
-    <span
-      aria-hidden
-      className="h-[15px] w-[5px] shrink-0 rounded-l-[2px]"
-      style={{ background: shade(color, 0.42) }}
-    />
-  );
+  const api = useSlots();
+  const drop = useSlotDrop("value", () => api.dropValue(blockId, slot));
+  const glow = drop.over ? SLOT_OVER : drop.accepting ? SLOT_ACCEPT : undefined;
 
   if (value && typeof value === "object" && "ref" in value) {
-    const io = CATEGORY_COLOR.io;
     return (
-      <span className="inline-flex items-center">
-        {socket}
+      <span {...drop.props} className="inline-flex items-center">
         <span
-          className="inline-flex h-[26px] items-center gap-1 rounded-[4px] pr-1 pl-2 text-[14.5px] text-white"
-          style={{ background: io, boxShadow: `inset 0 0 0 1px ${shade(io, 0.22)}` }}
+          draggable
+          role="button"
+          aria-label={`${reporterLabel(value.ref)} (arraste para mover ou remover)`}
+          title={`${REPORTER_HINT[value.ref]}. Arraste para outro campo, ou para a lixeira para remover.`}
+          onDragStart={(event) => {
+            event.stopPropagation();
+            api.startDrag(event, { from: "slot", blockId, key: slot, ref: value.ref });
+          }}
+          onDragEnd={api.endDrag}
+          className="inline-flex cursor-grab active:cursor-grabbing"
         >
-          {reporterLabel(value.ref)}
-          <button
-            type="button"
-            aria-label="Remover variável"
-            onClick={() => onChange(0)}
-            className="grid size-4 place-items-center rounded-full text-[11px] leading-none text-white/75 hover:bg-white/20 hover:text-white"
-          >
-            ×
-          </button>
+          <ReporterShape io={value.ref} glow={glow} />
         </span>
       </span>
     );
@@ -292,26 +418,183 @@ function ValueInput({
 
   const text = String(asNumber(value, 0));
   return (
-    <span
-      className="inline-flex items-center"
-      onDragOver={allowIo}
-      onDrop={(event) => {
-        const ref = event.dataTransfer.getData(IO_MIME);
-        if (isIoRef(ref)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onChange({ ref });
-        }
-      }}
-    >
-      {socket}
+    <span {...drop.props} className="inline-flex items-center">
+      <span
+        aria-hidden
+        className="h-[15px] w-[6px] shrink-0 rounded-l-[3px]"
+        style={{ background: shade(color, 0.42) }}
+      />
       <input
         type="number"
         value={text}
         onChange={(event) => onChange(Number(event.target.value))}
         className="h-[26px] rounded-[4px] bg-[#eeedfa] px-1 text-center text-[15px] text-[#2d2d3a] outline-none [appearance:textfield] focus:ring-2 focus:ring-white/80 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-        style={{ width: `calc(${Math.max(text.length, 1)}ch + 22px)`, fontFamily: BLOCK_FONT }}
+        style={{
+          width: `calc(${Math.max(text.length, 1)}ch + 22px)`,
+          fontFamily: BLOCK_FONT,
+          outline: glow
+            ? `2px ${glow === SLOT_OVER ? "solid" : "dashed"} ${glow}`
+            : undefined,
+          outlineOffset: glow ? 2 : undefined,
+        }}
       />
+    </span>
+  );
+}
+
+function OpSelect({
+  color,
+  value,
+  onChange,
+}: {
+  color: string;
+  value: CompareOp;
+  onChange: (next: CompareOp) => void;
+}) {
+  return (
+    <span className="relative inline-flex items-center">
+      <select
+        value={value}
+        aria-label="Operador de comparação"
+        onChange={(event) => onChange(event.target.value as CompareOp)}
+        className="h-[24px] cursor-pointer appearance-none rounded-[4px] pr-[18px] pl-[7px] text-[15px] text-white outline-none focus:ring-2 focus:ring-white/70"
+        style={{
+          background: shade(color, -0.18),
+          boxShadow: `inset 0 0 0 1px ${shade(color, 0.12)}`,
+          fontFamily: BLOCK_FONT,
+        }}
+      >
+        {COMPARE_OPS.map((item) => (
+          <option key={item.op} value={item.op} className="text-slate-800">
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <svg
+        aria-hidden
+        viewBox="0 0 8 5"
+        className="pointer-events-none absolute right-[6px] h-[5px] w-[8px]"
+      >
+        <path d="M0.5 0.5 4 4.2 7.5 0.5" fill="none" stroke="white" strokeWidth="1.3" />
+      </svg>
+    </span>
+  );
+}
+
+function HexShape({
+  color,
+  glow,
+  dashed = false,
+  children,
+  minW = 0,
+}: {
+  color: string;
+  glow?: string;
+  dashed?: boolean;
+  children?: ReactNode;
+  minW?: number;
+}) {
+  const [ref, box] = useBoxSize<HTMLSpanElement>();
+  return (
+    <span
+      ref={ref}
+      className="relative inline-flex items-center"
+      style={{ minWidth: minW, minHeight: 26 }}
+    >
+      {box.w > 0 ? (
+        <svg
+          aria-hidden
+          width={box.w}
+          height={box.h}
+          className="pointer-events-none absolute top-0 left-0 overflow-visible"
+          style={svgGlow(glow)}
+        >
+          <path
+            d={booleanPath(box.w, box.h)}
+            fill={color}
+            stroke={shade(color, dashed ? 0.35 : 0.22)}
+            strokeWidth={1}
+            strokeDasharray={dashed ? "3 2" : undefined}
+            style={{ pointerEvents: "visiblePainted" }}
+          />
+        </svg>
+      ) : null}
+      {children}
+    </span>
+  );
+}
+
+function CompareBlock({
+  block,
+  glow,
+  onField,
+}: {
+  block: ExperimentBlock;
+  glow?: string;
+  onField: (key: string, value: FieldValue) => void;
+}) {
+  const api = useSlots();
+  const condition = block.condition;
+  if (!condition) {
+    return null;
+  }
+  const color = CATEGORY_COLOR.compare;
+  return (
+    <span
+      draggable
+      onPointerDown={armDrag}
+      onDragStart={(event) => {
+        event.stopPropagation();
+        api.startDrag(event, { from: "cond", blockId: block.id });
+      }}
+      onDragEnd={api.endDrag}
+      title="Arraste a comparação para outro bloco, ou para a lixeira para remover"
+      className="inline-flex cursor-grab active:cursor-grabbing"
+    >
+      <HexShape color={color} glow={glow}>
+        <span className="relative flex items-center gap-[6px] py-[3px] pr-[15px] pl-[16px]">
+          <ValueInput
+            color={color}
+            blockId={block.id}
+            slot={COND_LEFT}
+            value={condition.left}
+            onChange={(next) => onField(COND_LEFT, next)}
+          />
+          <OpSelect color={color} value={condition.op} onChange={(op) => api.setOp(block.id, op)} />
+          <ValueInput
+            color={color}
+            blockId={block.id}
+            slot={COND_RIGHT}
+            value={condition.right}
+            onChange={(next) => onField(COND_RIGHT, next)}
+          />
+        </span>
+      </HexShape>
+    </span>
+  );
+}
+
+function ConditionSlot({
+  block,
+  color,
+  onField,
+}: {
+  block: ExperimentBlock;
+  color: string;
+  onField: (key: string, value: FieldValue) => void;
+}) {
+  const api = useSlots();
+  const drop = useSlotDrop("condition", () => api.dropCondition(block.id));
+  const glow = drop.over ? SLOT_OVER : drop.accepting ? SLOT_ACCEPT : undefined;
+  return (
+    <span {...drop.props} className="inline-flex items-center">
+      {block.condition ? (
+        <CompareBlock block={block} glow={glow} onField={onField} />
+      ) : (
+        <span title="Encaixe aqui uma Comparação" className="inline-flex">
+          <HexShape color={shade(color, 0.3)} glow={glow} dashed minW={64} />
+        </span>
+      )}
     </span>
   );
 }
@@ -473,7 +756,13 @@ function BlockBody({
   onField: (key: string, value: FieldValue) => void;
 }) {
   const field = (key: string) => (
-    <ValueInput color={color} value={block.fields[key]} onChange={(next) => onField(key, next)} />
+    <ValueInput
+      color={color}
+      blockId={block.id}
+      slot={key}
+      value={block.fields[key]}
+      onChange={(next) => onField(key, next)}
+    />
   );
   const duration = (key: string) => (
     <DurationSelect
@@ -493,13 +782,13 @@ function BlockBody({
     case "while":
       return (
         <Row>
-          Enquanto vazão &gt; {field("threshold")} mL/min
+          Enquanto <ConditionSlot block={block} color={color} onField={onField} />
         </Row>
       );
     case "if":
       return (
         <Row>
-          Se vazão ≥ {field("threshold")} mL/min
+          Se <ConditionSlot block={block} color={color} onField={onField} />
         </Row>
       );
     case "setFlow":
@@ -555,10 +844,11 @@ function BlockBody({
           />
         </div>
       );
+    case "compare":
     case "varFlow":
     case "varTime":
     case "varVolume":
-      return <Row>{reporterLabel(block.kind)}</Row>;
+      return null;
   }
 }
 
@@ -733,6 +1023,39 @@ function PaletteBlock({
   onAdd: () => void;
 }) {
   const color = CATEGORY_COLOR[item.category];
+  const kind = item.kind;
+  if (isReporter(kind) || kind === "compare") {
+    const hint = isReporter(kind)
+      ? `${REPORTER_HINT[kind]}. Arraste para um campo numérico de um bloco.`
+      : "Arraste para o espaço de condição de um bloco Enquanto ou Se, e depois encaixe variáveis nela.";
+    return (
+      <div
+        role="button"
+        tabIndex={-1}
+        aria-label={item.label}
+        title={hint}
+        draggable
+        onDragStart={(event) => onDragStart(event, { from: "palette", kind })}
+        onDragEnd={onDragEnd}
+        className="w-fit cursor-grab outline-none active:cursor-grabbing"
+      >
+        {isReporter(kind) ? (
+          <ReporterShape io={kind} small />
+        ) : (
+          <HexShape color={color}>
+            <span
+              className="relative flex items-center gap-[6px] py-[4px] pr-[12px] pl-[12px] text-[13.5px] leading-none text-white"
+              style={{ fontFamily: BLOCK_FONT }}
+            >
+              <span className="h-[17px] w-[26px] rounded-[4px] bg-[#eeedfa]" />
+              &gt;
+              <span className="h-[17px] w-[26px] rounded-[4px] bg-[#eeedfa]" />
+            </span>
+          </HexShape>
+        )}
+      </div>
+    );
+  }
   const label = item.category === "logic" ? `${item.label}...` : item.label;
   const text = (
     <div
@@ -793,11 +1116,13 @@ function RoundControl({
   label,
   onClick,
   ring = true,
+  disabled = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   ring?: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -806,7 +1131,8 @@ function RoundControl({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="pointer-events-auto grid size-[31px] place-items-center text-[#c4c4c4] transition-colors hover:text-[#8f8f8f]"
+      disabled={disabled}
+      className="pointer-events-auto grid size-[31px] place-items-center text-[#c4c4c4] transition-colors hover:text-[#8f8f8f] disabled:text-[#e3e3e3] disabled:hover:text-[#e3e3e3]"
     >
       <svg viewBox="0 0 24 24" className="size-[27px]" fill="none" stroke="currentColor" strokeWidth={1.5}>
         {ring ? <circle cx="12" cy="12" r="10.5" /> : null}
@@ -848,7 +1174,8 @@ export function ExperimentModal({
   onClose: () => void;
 }) {
   const [initial] = useState(() => loadPumpProgram(pumpId));
-  const [blocks, setBlocks] = useState<ExperimentBlock[]>(initial.blocks);
+  const [blocks, setBlocksState] = useState<ExperimentBlock[]>(initial.blocks);
+  const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
   const [name, setName] = useState(initial.name);
   const [docId, setDocId] = useState(initial.docId);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -860,6 +1187,7 @@ export function ExperimentModal({
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [hover, setHover] = useState<DropTarget | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragKind, setDragKind] = useState<DragKind | null>(null);
   const [overTrash, setOverTrash] = useState(false);
   const [zoom, setZoom] = useState(1);
   const dragRef = useRef<DragPayload | null>(null);
@@ -870,8 +1198,80 @@ export function ExperimentModal({
   const flashTimer = useRef<number | undefined>(undefined);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
+  const historyRef = useRef({
+    past: [] as ExperimentBlock[][],
+    future: [] as ExperimentBlock[][],
+    mergeKey: null as string | null,
+    at: 0,
+  });
   blocksRef.current = blocks;
   programRef.current = { name, docId, blocks };
+
+  const syncHistory = () => {
+    const history = historyRef.current;
+    setHistorySize({ past: history.past.length, future: history.future.length });
+  };
+
+  const showBlocks = (next: ExperimentBlock[]) => {
+    blocksRef.current = next;
+    setBlocksState(next);
+  };
+
+  /** Edições seguidas no mesmo campo (mesma mergeKey) viram um único passo de desfazer. */
+  const setBlocks = (
+    update: (current: ExperimentBlock[]) => ExperimentBlock[],
+    mergeKey?: string,
+  ) => {
+    const current = blocksRef.current;
+    const next = update(current);
+    if (next === current) {
+      return;
+    }
+    const history = historyRef.current;
+    const now = Date.now();
+    const merge =
+      mergeKey !== undefined && mergeKey === history.mergeKey && now - history.at < HISTORY_MERGE_MS;
+    if (!merge) {
+      history.past.push(current);
+      if (history.past.length > HISTORY_LIMIT) {
+        history.past.shift();
+      }
+    }
+    history.future = [];
+    history.mergeKey = mergeKey ?? null;
+    history.at = now;
+    showBlocks(next);
+    syncHistory();
+  };
+
+  const undo = () => {
+    const history = historyRef.current;
+    const previous = history.past.pop();
+    if (!previous) {
+      return;
+    }
+    history.future.push(blocksRef.current);
+    history.mergeKey = null;
+    showBlocks(previous);
+    syncHistory();
+  };
+
+  const redo = () => {
+    const history = historyRef.current;
+    const next = history.future.pop();
+    if (!next) {
+      return;
+    }
+    history.past.push(blocksRef.current);
+    history.mergeKey = null;
+    showBlocks(next);
+    syncHistory();
+  };
+
+  const resetHistory = () => {
+    historyRef.current = { past: [], future: [], mergeKey: null, at: 0 };
+    syncHistory();
+  };
 
   const persistNow = () => {
     pendingRef.current = false;
@@ -914,6 +1314,38 @@ export function ExperimentModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [confirm, libraryOpen, minimized, onClose]);
 
+  const undoRef = useRef(undo);
+  const redoRef = useRef(redo);
+  undoRef.current = undo;
+  redoRef.current = redo;
+
+  useEffect(() => {
+    if (minimized || libraryOpen || confirm) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key !== "z" && key !== "y") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target instanceof HTMLInputElement && target.type === "text") {
+        return;
+      }
+      event.preventDefault();
+      if (key === "y" || event.shiftKey) {
+        redoRef.current();
+      } else {
+        undoRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirm, libraryOpen, minimized]);
+
   useEffect(() => {
     try {
       localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
@@ -951,7 +1383,8 @@ export function ExperimentModal({
       setNameDraft(null);
       setName(next.name);
       setDocId(next.docId);
-      setBlocks(next.blocks);
+      showBlocks(next.blocks);
+      resetHistory();
       programRef.current = next;
       persistNow();
       setLibraryOpen(false);
@@ -1072,11 +1505,16 @@ export function ExperimentModal({
     dragRef.current = null;
     setHover(null);
     setDraggingId(null);
+    setDragKind(null);
     setOverTrash(false);
   };
 
   const hoverTarget = (target: DropTarget) => {
     const drag = dragRef.current;
+    if (payloadKind(drag) !== "statement") {
+      setHover(null);
+      return;
+    }
     if (drag?.from === "canvas" && target.parentId) {
       const moving = findBlock(blocksRef.current, drag.id);
       if (moving && containsId(moving, target.parentId)) {
@@ -1100,41 +1538,96 @@ export function ExperimentModal({
     if (target === "trash") {
       if (drag.from === "canvas") {
         setBlocks((current) => removeBlock(current, drag.id).next);
+      } else if (drag.from === "slot") {
+        setBlocks((current) => clearSlot(current, drag.blockId, drag.key));
+      } else if (drag.from === "cond") {
+        setBlocks((current) => setCondition(current, drag.blockId, null));
       }
       return;
     }
     if (drag.from === "palette") {
-      setBlocks((current) =>
-        insertBlock(current, target.parentId, target.index, createBlock(drag.kind)),
-      );
+      if (isStatement(drag.kind)) {
+        setBlocks((current) =>
+          insertBlock(current, target.parentId, target.index, createBlock(drag.kind)),
+        );
+      }
       return;
     }
-    setBlocks((current) => moveBlock(current, drag.id, target.parentId, target.index));
+    if (drag.from === "canvas") {
+      setBlocks((current) => moveBlock(current, drag.id, target.parentId, target.index));
+    }
+  };
+
+  const dropValue = (blockId: string, key: string) => {
+    const drag = dragRef.current;
+    resetDrag();
+    if (drag?.from === "palette" && isReporter(drag.kind)) {
+      const io = drag.kind;
+      setBlocks((current) => setField(current, blockId, key, { ref: io }));
+    } else if (drag?.from === "slot" && (drag.blockId !== blockId || drag.key !== key)) {
+      setBlocks((current) =>
+        setField(clearSlot(current, drag.blockId, drag.key), blockId, key, { ref: drag.ref }),
+      );
+    }
+  };
+
+  const dropCondition = (blockId: string) => {
+    const drag = dragRef.current;
+    resetDrag();
+    if (drag?.from === "palette" && drag.kind === "compare") {
+      setBlocks((current) => setCondition(current, blockId, emptyCondition()));
+    } else if (drag?.from === "cond" && drag.blockId !== blockId) {
+      setBlocks((current) => {
+        const moving = findBlock(current, drag.blockId)?.condition ?? null;
+        const replaced = findBlock(current, blockId)?.condition ?? null;
+        return setCondition(setCondition(current, drag.blockId, replaced), blockId, moving);
+      });
+    }
   };
 
   const startDrag = (event: DragEvent, payload: DragPayload) => {
     dragRef.current = payload;
     event.dataTransfer.effectAllowed = "copyMove";
-    if (payload.from === "palette" && isReporter(payload.kind)) {
-      event.dataTransfer.setData(IO_MIME, payload.kind);
-    }
-    event.dataTransfer.setData("text/plain", payload.from === "palette" ? payload.kind : payload.id);
-    if (payload.from === "canvas") {
-      window.setTimeout(() => setDraggingId(payload.id), 0);
-    }
+    event.dataTransfer.setData("text/plain", payload.from);
+    const kind = payloadKind(payload);
+    window.setTimeout(() => {
+      if (dragRef.current !== payload) {
+        return;
+      }
+      if (payload.from === "canvas") {
+        setDraggingId(payload.id);
+      }
+      setDragKind(kind);
+    }, 0);
+  };
+
+  const slotApi: SlotApi = {
+    dragKind,
+    payload: () => dragRef.current,
+    startDrag,
+    endDrag: resetDrag,
+    dropValue,
+    dropCondition,
+    setOp: (blockId, op) => setBlocks((current) => setCompareOp(current, blockId, op)),
   };
 
   const handlers: NodeHandlers = {
     hover,
     draggingId,
     onHover: hoverTarget,
-    onField: (id, key, value) => setBlocks((current) => setField(current, id, key, value)),
+    onField: (id, key, value) =>
+      setBlocks((current) => setField(current, id, key, value), `${id}:${key}`),
     onDragStart: startDrag,
     onDragEnd: resetDrag,
   };
 
+  const removable = () => {
+    const from = dragRef.current?.from;
+    return from === "canvas" || from === "slot" || from === "cond";
+  };
+
   const acceptCanvasBlock = (event: DragEvent) => {
-    if (dragRef.current?.from === "canvas") {
+    if (removable()) {
       event.preventDefault();
       setHover(null);
     }
@@ -1314,13 +1807,14 @@ export function ExperimentModal({
           </div>
         </header>
 
+        <SlotContext.Provider value={slotApi}>
         <div className="flex min-h-0 flex-1 gap-3 pr-3 pb-3">
           <aside
             aria-label="Blocos disponíveis"
             className="bk-scroll w-[min(292px,32%)] shrink-0 overflow-y-auto bg-[#f2f7fb] py-1 pr-2"
             onDragOver={acceptCanvasBlock}
             onDrop={(event) => {
-              if (dragRef.current?.from === "canvas") {
+              if (removable()) {
                 event.preventDefault();
                 applyDrop("trash");
               }
@@ -1341,7 +1835,11 @@ export function ExperimentModal({
                       item={item}
                       onDragStart={startDrag}
                       onDragEnd={resetDrag}
-                      onAdd={() => setBlocks((current) => [...current, createBlock(item.kind)])}
+                      onAdd={() => {
+                        if (isStatement(item.kind)) {
+                          setBlocks((current) => [...current, createBlock(item.kind)]);
+                        }
+                      }}
                     />
                   ))}
                 </div>
@@ -1354,6 +1852,9 @@ export function ExperimentModal({
               ref={canvasRef}
               className="bk-scroll absolute inset-0 overflow-auto"
               onDragOver={(event) => {
+                if (payloadKind(dragRef.current) !== "statement") {
+                  return;
+                }
                 event.preventDefault();
                 hoverTarget({ parentId: null, index: blocksRef.current.length });
               }}
@@ -1381,6 +1882,15 @@ export function ExperimentModal({
             </div>
 
             <div className="pointer-events-none absolute right-[30px] bottom-[34px] flex flex-col items-center">
+              <RoundControl label="Desfazer (Ctrl+Z)" disabled={historySize.past === 0} onClick={undo}>
+                <path d="M10 8 6.5 11.5 10 15" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M7 11.5h7a3 3 0 0 1 0 6h-1.5" strokeLinecap="round" />
+              </RoundControl>
+              <RoundControl label="Refazer (Ctrl+Y)" disabled={historySize.future === 0} onClick={redo}>
+                <path d="M14 8l3.5 3.5L14 15" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M17 11.5h-7a3 3 0 0 0 0 6h1.5" strokeLinecap="round" />
+              </RoundControl>
+              <span aria-hidden className="h-[8px]" />
               <RoundControl
                 label="Centralizar e restaurar zoom"
                 ring={false}
@@ -1431,6 +1941,7 @@ export function ExperimentModal({
             </div>
           </div>
         </div>
+        </SlotContext.Provider>
 
         <footer className="border-t border-[#e2e8ef] bg-white/70 px-6 py-2.5">
           <ProgramControls

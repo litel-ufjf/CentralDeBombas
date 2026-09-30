@@ -251,6 +251,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
   const heartbeatRef = useRef<number | null>(null);
   const helloWaitRef = useRef<((ok: boolean) => void) | null>(null);
   const programSupportRef = useRef(false);
+  const conditionSupportRef = useRef(false);
   const programsRef = useRef(programs);
   programsRef.current = programs;
   const lastClockSyncRef = useRef(0);
@@ -309,6 +310,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         await client.disconnect();
       }
       programSupportRef.current = false;
+      conditionSupportRef.current = false;
       setConnected(false);
       setConnecting(false);
       setSetpoints(createDefaultSetpoints());
@@ -346,6 +348,7 @@ export function BenchProvider({ children }: { children: ReactNode }) {
           }
           if (line.kind === "hello") {
             programSupportRef.current = line.programs;
+            conditionSupportRef.current = line.conditions;
             helloWaitRef.current?.(true);
             helloWaitRef.current = null;
             return;
@@ -845,6 +848,11 @@ export function BenchProvider({ children }: { children: ReactNode }) {
         throw new Error("Escolha um horário no futuro para agendar.");
       }
       const program = compileProgram(blocks);
+      if (program.needsConditions && !conditionSupportRef.current) {
+        throw new Error(
+          "Esta programação compara tempo, volume ou usa < e ≤, o que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado.",
+        );
+      }
       const set = calibrations[id - 1];
       const forward = resolveCalibration(set, "forward", preferences, id).calibration;
       const reverse = resolveCalibration(set, "reverse", preferences, id).calibration;

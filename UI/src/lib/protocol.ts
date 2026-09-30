@@ -10,6 +10,7 @@ export type ParsedHello = {
   motors: number;
   bits: number;
   programs: boolean;
+  conditions: boolean;
 };
 
 export type ParsedState = {
@@ -109,6 +110,7 @@ export function parseLine(raw: string): ParsedLine | null {
       motors: Number(parts[2] || MOTOR_COUNT),
       bits: Number(parts[3] || 12),
       programs: parts.slice(4).includes("PROG1"),
+      conditions: parts.slice(4).includes("PROG2"),
     };
   }
 

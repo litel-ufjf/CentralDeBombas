@@ -3,6 +3,8 @@
 //   T,<epoch_ms>                       acerta o relógio com o horário do computador
 //   PB,<id>,<n>,<aF>,<p0F>,<aR>,<p0R>  começa a receber um programa de n instruções
 //   PI,<id>,<i>,<op>,<salto>,<cmp>,<a>,<b>,<c>  instrução i do programa
+//     operandos: número, @F (vazão), @T (tempo em s), @V (volume em mL) ou - (vazio)
+//     H/C: cmp é > G(≥) < L(≤); "a" sozinho compara a vazão com a (PROG1), "a,b" compara a com b (PROG2)
 //   PS,<id>,<inicio_epoch_ms>          executa (0 = agora) ou agenda para o horário
 //   PP,<id>,<1|0>                      pausa (1) ou retoma (0)
 //   PX,<id>                            para o programa da bomba
@@ -129,7 +131,7 @@ void printState() {
 }
 
 void printHello() {
-  Serial.println("H,BOMBA,6,12,PROG1");
+  Serial.println("H,BOMBA,6,12,PROG1,PROG2");
 }
 
 void printError(const char* message) {
@@ -191,9 +193,17 @@ float evalOperand(const Program& p, const Operand& operand) {
   }
 }
 
+// Com um operando só (formato PROG1) compara a vazão atual; com dois, compara a com b.
 bool conditionHolds(const Program& p, const Instr& in) {
-  float threshold = evalOperand(p, in.arg[0]);
-  return in.cmp == 'G' ? p.flow >= threshold : p.flow > threshold;
+  bool single = in.arg[1].ref == '-';
+  float left = single ? p.flow : evalOperand(p, in.arg[0]);
+  float right = evalOperand(p, single ? in.arg[0] : in.arg[1]);
+  switch (in.cmp) {
+    case 'G': return left >= right;
+    case '<': return left < right;
+    case 'L': return left <= right;
+    default: return left > right;
+  }
 }
 
 void finishProgram(int index, ProgState state) {
@@ -386,6 +396,10 @@ bool parseOperand(const char* token, Operand& out) {
   }
   out.ref = 0;
   out.value = 0;
+  if (token[0] == '-' && token[1] == 0) {
+    out.ref = '-';
+    return true;
+  }
   if (token[0] == '@') {
     if (token[1] != 'F' && token[1] != 'T' && token[1] != 'V') {
       return false;
@@ -393,9 +407,7 @@ bool parseOperand(const char* token, Operand& out) {
     out.ref = token[1];
     return true;
   }
-  if (token[0] != '-' || token[1] != 0) {
-    out.value = atof(token);
-  }
+  out.value = atof(token);
   return true;
 }
 

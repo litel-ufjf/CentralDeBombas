@@ -94,7 +94,12 @@ try {
       awaitPromise: true,
       returnByValue: true,
     });
-    console.log("cenário:", run.result?.result?.value ?? JSON.stringify(run.result));
+    console.log(
+      "cenário:",
+      run.result?.result?.value ??
+        run.result?.exceptionDetails?.exception?.description ??
+        JSON.stringify(run.result),
+    );
     await sleep(400);
   }
   const shot = await send("Page.captureScreenshot", { format: "png" });

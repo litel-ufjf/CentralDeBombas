@@ -1,18 +1,33 @@
 import type { Calibration } from "./calibration";
-import { isReporter, type ExperimentBlock, type FieldValue } from "./experiment";
+import {
+  isStatement,
+  type CompareOp,
+  type Condition,
+  type ExperimentBlock,
+  type FieldValue,
+} from "./experiment";
 
 export const MAX_INSTRUCTIONS = 128;
 
 export type Instruction = {
   op: string;
   jump: number;
-  cmp: ">" | "G" | "-";
+  cmp: ">" | "G" | "<" | "L" | "-";
   args: [string, string, string];
 };
 
 export type CompiledProgram = {
   instructions: Instruction[];
   estimatedSeconds: number | null;
+  /** Usa comparações que só o firmware com PROG2 entende. */
+  needsConditions: boolean;
+};
+
+const CMP_CODE: Record<CompareOp, Instruction["cmp"]> = {
+  ">": ">",
+  ">=": "G",
+  "<": "<",
+  "<=": "L",
 };
 
 export class ProgramCompileError extends Error {}
@@ -57,14 +72,29 @@ function emit(
   return out.length - 1;
 }
 
-function compileList(blocks: ExperimentBlock[], out: Instruction[]): number | null {
+type CompileState = { out: Instruction[]; needsConditions: boolean };
+
+function conditionArgs(condition: Condition, state: CompileState) {
+  const flowOnLeft =
+    typeof condition.left === "object" &&
+    condition.left.ref === "varFlow" &&
+    (condition.op === ">" || condition.op === ">=");
+  if (flowOnLeft) {
+    return [operand(condition.right)];
+  }
+  state.needsConditions = true;
+  return [operand(condition.left), operand(condition.right)];
+}
+
+function compileList(blocks: ExperimentBlock[], state: CompileState): number | null {
+  const out = state.out;
   let total: number | null = 0;
   const add = (value: number | null) => {
     total = total === null || value === null ? null : total + value;
   };
 
   for (const block of blocks) {
-    if (isReporter(block.kind)) {
+    if (!isStatement(block.kind)) {
       continue;
     }
     const f = block.fields;
@@ -94,11 +124,24 @@ function compileList(blocks: ExperimentBlock[], out: Instruction[]): number | nu
       case "for":
       case "while":
       case "if": {
-        const op = block.kind === "for" ? "L" : block.kind === "while" ? "H" : "C";
-        const cmp = block.kind === "while" ? ">" : block.kind === "if" ? "G" : "-";
-        const value = block.kind === "for" ? f.times : f.threshold;
-        const open = emit(out, op, [operand(value)], cmp);
-        const inner = compileList(block.children ?? [], out);
+        let open: number;
+        if (block.kind === "for") {
+          open = emit(out, "L", [operand(f.times)]);
+        } else {
+          const condition = block.condition;
+          if (!condition) {
+            throw new ProgramCompileError(
+              `O bloco “${block.kind === "while" ? "Enquanto" : "Se"}” está sem condição. Encaixe nele uma Comparação.`,
+            );
+          }
+          open = emit(
+            out,
+            block.kind === "while" ? "H" : "C",
+            conditionArgs(condition, state),
+            CMP_CODE[condition.op],
+          );
+        }
+        const inner = compileList(block.children ?? [], state);
         const close = emit(out, "E");
         out[open].jump = close;
         out[close].jump = open;
@@ -118,8 +161,9 @@ function compileList(blocks: ExperimentBlock[], out: Instruction[]): number | nu
 }
 
 export function compileProgram(blocks: ExperimentBlock[]): CompiledProgram {
-  const instructions: Instruction[] = [];
-  const estimatedSeconds = compileList(blocks, instructions);
+  const state: CompileState = { out: [], needsConditions: false };
+  const estimatedSeconds = compileList(blocks, state);
+  const instructions = state.out;
   if (instructions.length === 0) {
     throw new ProgramCompileError("O programa está vazio. Arraste ao menos um bloco de ação.");
   }
@@ -128,7 +172,7 @@ export function compileProgram(blocks: ExperimentBlock[]): CompiledProgram {
       `O programa tem ${instructions.length} instruções; o limite da placa é ${MAX_INSTRUCTIONS}.`,
     );
   }
-  return { instructions, estimatedSeconds };
+  return { instructions, estimatedSeconds, needsConditions: state.needsConditions };
 }
 
 function calibField(value: number) {

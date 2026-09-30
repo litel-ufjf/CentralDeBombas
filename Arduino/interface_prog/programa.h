@@ -12,8 +12,8 @@ enum Op : uint8_t {
   OP_SINE,   // S: a ± b por um período de c segundos
   OP_STEP,   // D: a na primeira metade de c segundos, b na segunda
   OP_FOR,    // L: repete a vezes até o END em salto
-  OP_WHILE,  // H: enquanto vazão (cmp) a
-  OP_IF,     // C: se vazão (cmp) a
+  OP_WHILE,  // H: enquanto a (cmp) b, ou vazão (cmp) a se b estiver vazio
+  OP_IF,     // C: se a (cmp) b, ou vazão (cmp) a se b estiver vazio
   OP_END,    // E: fecha o bloco aberto em salto
 };
 
@@ -29,13 +29,13 @@ enum ProgState : uint8_t {
 };
 
 struct Operand {
-  char ref;  // 0 = número; 'F' vazão, 'T' tempo, 'V' volume
+  char ref;  // 0 = número; 'F' vazão, 'T' tempo, 'V' volume; '-' vazio
   float value;
 };
 
 struct Instr {
   uint8_t op;
-  char cmp;  // '>' ou 'G' (≥)
+  char cmp;  // '>', 'G' (≥), '<' ou 'L' (≤)
   int16_t jump;
   Operand arg[3];
 };

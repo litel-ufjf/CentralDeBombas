@@ -38,7 +38,7 @@ const fakeBoard = `(() => {
     const id = Number(parts[1]);
     const p = programs[id];
     switch (parts[0]) {
-      case "H": emit("H,BOMBA,6,12,PROG1"); break;
+      case "H": emit("H,BOMBA,6,12,PROG1,PROG2"); break;
       case "T": clockOffset = Number(parts[1]) - Date.now(); emit("T," + parts[1]); break;
       case "G":
         emit(stateLine());
@@ -400,6 +400,74 @@ try {
   await click("Programar experimento");
   await sleep(700);
   check("persiste após recarregar", (await run(`${nameInput}.value`)) === "Ensaio de rampa");
+
+  const pauses = () =>
+    run(`[...${editor}.querySelectorAll("div")].filter((d) => d.childNodes[0]?.textContent?.trim() === "Pausar por").length`);
+  const key = (k, shift = false) =>
+    run(`window.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, ctrlKey: true, shiftKey: ${shift}, bubbles: true, cancelable: true }))`);
+  const before = await pauses();
+  await run(`document.querySelector('[aria-label="Blocos disponíveis"] [aria-label="Pausar"]').click()`);
+  await sleep(200);
+  check("adiciona bloco", (await pauses()) === before + 1);
+  await key("z");
+  await sleep(200);
+  check("Ctrl+Z desfaz", (await pauses()) === before);
+  await key("y");
+  await sleep(200);
+  check("Ctrl+Y refaz", (await pauses()) === before + 1);
+  await key("z");
+  await sleep(200);
+  await key("z", true);
+  await sleep(200);
+  check("Ctrl+Shift+Z refaz", (await pauses()) === before + 1);
+  const firstNumber = `${editor}.querySelector('input[type="number"]')`;
+  const original = await run(`${firstNumber}.value`);
+  for (const value of ["7", "77"]) {
+    await run(`(() => {
+      const input = ${firstNumber};
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(value)});
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await sleep(100);
+  }
+  await key("z");
+  await sleep(200);
+  check("digitação no campo desfaz em um passo", (await run(`${firstNumber}.value`)) === original, `${original} → ${await run(`${firstNumber}.value`)}`);
+  check("botão desfazer habilitado", await run(`!document.querySelector('[aria-label="Desfazer (Ctrl+Z)"]').disabled`));
+
+  const setFlow = { id: "f1", kind: "setFlow", fields: { flow: { ref: "varFlow" } } };
+  const programs = [null, null,
+    { name: "Condição nova", docId: null, blocks: [{ id: "w1", kind: "while", fields: {}, condition: { left: { ref: "varTime" }, op: "<", right: 60 }, children: [setFlow] }] },
+    [{ id: "w2", kind: "while", fields: { threshold: 5 }, children: [{ id: "f2", kind: "setFlow", fields: { flow: 20 } }] }],
+  ];
+  const inject = await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `if (!sessionStorage.getItem("injetado")) {
+      sessionStorage.setItem("injetado", "1");
+      localStorage.setItem("bomba.experiment.v1", ${JSON.stringify(JSON.stringify(programs))});
+    }`,
+  });
+  for (const [pump, expected, label] of [
+    [3, "PI,3,0,H,2,<,@T,60,-", "condição com tempo envia H,<,@T,60"],
+    [4, "PI,4,0,H,2,>,5,-,-", "programa antigo segue no formato PROG1"],
+  ]) {
+    await run(`location.hash = "#/bomba/${pump}"`);
+    await send("Page.reload");
+    await sleep(2500);
+    await click("Conectar");
+    await sleep(900);
+    await click("Programar experimento");
+    await sleep(700);
+    mark = await sentCount();
+    await click("Executar agora", footer);
+    await sleep(900);
+    const lines = await sentSince(mark);
+    check(label, lines.includes(expected), lines.filter((l) => l.startsWith("PI")).join(" | "));
+    await click("Parar", footer);
+    await sleep(200);
+    await click("Parar", dialog);
+    await sleep(300);
+  }
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: inject.result.identifier });
   ws.close();
 } finally {
   browser.kill();
