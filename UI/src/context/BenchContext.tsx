@@ -849,10 +849,14 @@ export function BenchProvider({ children }: { children: ReactNode }) {
       }
       const program = compileProgram(blocks);
       if (program.firmwareLevel > programLevelRef.current) {
+        const feature =
+          program.firmwareLevel >= 4
+            ? "usa operadores lógicos (e, ou, ou exclusivo, não)"
+            : program.firmwareLevel === 3
+              ? "usa senão, escolha/caso, = ou ≠, ou a variável Sentido"
+              : "compara tempo, volume ou usa < e ≤";
         throw new Error(
-          program.firmwareLevel >= 3
-            ? "Esta programação usa senão, escolha/caso, = ou ≠, ou a variável Sentido, que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado."
-            : "Esta programação compara tempo, volume ou usa < e ≤, o que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado.",
+          `Esta programação ${feature}, o que o firmware da placa ainda não aceita. Grave de novo o sketch Arduino/interface_prog atualizado.`,
         );
       }
       const set = calibrations[id - 1];

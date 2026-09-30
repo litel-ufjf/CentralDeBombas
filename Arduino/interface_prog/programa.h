@@ -16,7 +16,15 @@ enum Op : uint8_t {
   OP_IF,     // C: se a (cmp) b, ou vazão (cmp) a se b estiver vazio
   OP_END,    // E: fecha o bloco aberto em salto
   OP_ELSE,   // N: senão de um C; salto aponta para o E do bloco
+  // Condição composta (pós-fixa), logo antes de um H/C com cmp '?'; no fluxo normal não fazem nada.
+  OP_TEST,   // Q: empilha a (cmp) b
+  OP_AND,    // &: e
+  OP_OR,     // |: ou
+  OP_XOR,    // ^: ou exclusivo
+  OP_NOT,    // ~: não
 };
+
+const int MAX_COND_STACK = 8;
 
 enum ProgState : uint8_t {
   PS_EMPTY,
@@ -36,7 +44,7 @@ struct Operand {
 
 struct Instr {
   uint8_t op;
-  char cmp;  // '>', 'G' (≥), '<', 'L' (≤), '=' ou '!' (≠)
+  char cmp;  // '>', 'G' (≥), '<', 'L' (≤), '=', '!' (≠) ou '?' (condição composta: a = nº de instruções antes)
   int16_t jump;
   Operand arg[3];
 };

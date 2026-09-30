@@ -38,7 +38,7 @@ const fakeBoard = `(() => {
     const id = Number(parts[1]);
     const p = programs[id];
     switch (parts[0]) {
-      case "H": emit("H,BOMBA,6,12,PROG1,PROG2,PROG3"); break;
+      case "H": emit("H,BOMBA,6,12,PROG1,PROG2,PROG3,PROG4"); break;
       case "T": clockOffset = Number(parts[1]) - Date.now(); emit("T," + parts[1]); break;
       case "G":
         emit(stateLine());
@@ -437,7 +437,12 @@ try {
 
   const setFlow = { id: "f1", kind: "setFlow", fields: { flow: { ref: "varFlow" } } };
   const flow = (id, value) => ({ id, kind: "setFlow", fields: { flow: value } });
-  const programs = [null, null,
+  const programs = [
+    { name: "Operadores lógicos", docId: null, blocks: [
+      { id: "w9", kind: "while", fields: {}, condition: { logic: "and", a: { left: { ref: "varTime" }, op: "<", right: 60 }, b: { logic: "not", a: { ref: "varDir" } } }, children: [{ id: "v9", kind: "invert", fields: {} }] },
+      { id: "i9", kind: "if", fields: {}, condition: { logic: "or", a: { ref: "varDir" }, b: { left: { ref: "varVolume" }, op: ">=", right: 100 } }, children: [{ id: "p9", kind: "pause", fields: { seconds: 1 } }] },
+    ] },
+    null,
     { name: "Condição nova", docId: null, blocks: [{ id: "w1", kind: "while", fields: {}, condition: { left: { ref: "varTime" }, op: "<", right: 60 }, children: [setFlow] }] },
     [{ id: "w2", kind: "while", fields: { threshold: 5 }, children: [{ id: "f2", kind: "setFlow", fields: { flow: 20 } }] }],
     { name: "Se senão", docId: null, blocks: [
@@ -460,6 +465,7 @@ try {
   const caseRows = () =>
     run(`[...${editor}.querySelectorAll("div")].filter((d) => d.childNodes[0]?.textContent?.trim() === "caso").length`);
   for (const [pump, expected, label] of [
+    [1, ["PI,1,0,Q,-1,<,@T,60,-", "PI,1,1,Q,-1,!,@D,0,-", "PI,1,2,~,-1,-,-,-,-", "PI,1,3,&,-1,-,-,-,-", "PI,1,4,H,6,?,4,-,-", "PI,1,6,E,4,-,-,-,-", "PI,1,9,|,-1,-,-,-,-", "PI,1,10,C,12,?,3,-,-"], "e, ou e não viram condição pós-fixa antes do H/C"],
     [3, ["PI,3,0,H,2,<,@T,60,-"], "condição com tempo envia H,<,@T,60"],
     [4, ["PI,4,0,H,2,>,5,-,-"], "programa antigo segue no formato PROG1"],
     [5, ["PI,5,0,C,2,!,@D,0,-", "PI,5,2,N,4,-,-,-,-", "PI,5,4,E,0,-,-,-,-", "PI,5,5,C,7,!,@D,1,-"], "se/senão com Sentido e ≠ envia C, N e E"],
@@ -472,10 +478,10 @@ try {
     await sleep(900);
     await click("Programar experimento");
     await sleep(700);
-    if (pump >= 5) {
+    if (pump >= 5 || pump === 1) {
       await run(`document.querySelector('[aria-label="Expandir"]')?.click()`);
       await sleep(400);
-      await shot(`${pump === 5 ? "13_se_senao" : "14_escolha_caso"}.png`);
+      await shot(`${pump === 1 ? "15_operadores_logicos" : pump === 5 ? "13_se_senao" : "14_escolha_caso"}.png`);
       await run(`document.querySelector('[aria-label="Restaurar tamanho"]')?.click()`);
       await sleep(200);
     }

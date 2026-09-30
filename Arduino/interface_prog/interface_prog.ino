@@ -6,7 +6,10 @@
 //     operandos: número, @F (vazão), @T (tempo em s), @V (volume em mL), @D (sentido: 1 direto, 0 reverso) ou - (vazio)
 //     H/C: cmp é > G(≥) < L(≤) = !(≠); "a" sozinho compara a vazão com a (PROG1), "a,b" compara a com b (PROG2)
 //     N: senão (PROG3). C salta para o N, que salta para o E: C cond → então… N → senão… E
-// PROG3 acrescenta = e ≠, @D e N.
+//     Condição composta (PROG4): instruções pós-fixas Q (cmp,a,b empilha a comparação), & (e), | (ou),
+//     ^ (ou exclusivo) e ~ (não) logo antes de um H/C com cmp '?' e a = quantidade delas.
+//     Ex.: "T < 60 e não Sentido" → Q,<,@T,60 · Q,!,@D,0 · ~ · & · H,?,4
+// PROG3 acrescenta = e ≠, @D e N; PROG4, os operadores lógicos.
 //   PS,<id>,<inicio_epoch_ms>          executa (0 = agora) ou agenda para o horário
 //   PP,<id>,<1|0>                      pausa (1) ou retoma (0)
 //   PX,<id>                            para o programa da bomba
@@ -134,7 +137,7 @@ void printState() {
 }
 
 void printHello() {
-  Serial.println("H,BOMBA,6,12,PROG1,PROG2,PROG3");
+  Serial.println("H,BOMBA,6,12,PROG1,PROG2,PROG3,PROG4");
 }
 
 void printError(const char* message) {
@@ -198,13 +201,9 @@ float evalOperand(const Program& p, const Operand& operand) {
   }
 }
 
-// Com um operando só (formato PROG1) compara a vazão atual; com dois, compara a com b.
-bool conditionHolds(const Program& p, const Instr& in) {
-  bool single = in.arg[1].ref == '-';
-  float left = single ? p.flow : evalOperand(p, in.arg[0]);
-  float right = evalOperand(p, single ? in.arg[0] : in.arg[1]);
+bool compareValues(char cmp, float left, float right) {
   bool equal = fabsf(left - right) <= EQUAL_EPS;
-  switch (in.cmp) {
+  switch (cmp) {
     case 'G': return left >= right;
     case '<': return left < right;
     case 'L': return left <= right;
@@ -212,6 +211,42 @@ bool conditionHolds(const Program& p, const Instr& in) {
     case '!': return !equal;
     default: return left > right;
   }
+}
+
+// Avalia as n instruções pós-fixas que antecedem o H/C em pc (já validadas por programIsValid).
+bool evalCompound(const Program& p, int pc, int n) {
+  bool stack[MAX_COND_STACK];
+  int top = 0;
+  for (int k = pc - n; k < pc; k++) {
+    const Instr& in = p.code[k];
+    switch (in.op) {
+      case OP_TEST:
+        stack[top++] = compareValues(in.cmp, evalOperand(p, in.arg[0]), evalOperand(p, in.arg[1]));
+        break;
+      case OP_NOT:
+        stack[top - 1] = !stack[top - 1];
+        break;
+      default: {
+        bool b = stack[--top];
+        bool a = stack[top - 1];
+        stack[top - 1] = in.op == OP_AND ? (a && b) : in.op == OP_OR ? (a || b) : (a != b);
+        break;
+      }
+    }
+  }
+  return stack[0];
+}
+
+// Com um operando só (formato PROG1) compara a vazão atual; com dois, compara a com b.
+bool conditionHolds(const Program& p, int pc) {
+  const Instr& in = p.code[pc];
+  if (in.cmp == '?') {
+    return evalCompound(p, pc, lroundf(in.arg[0].value));
+  }
+  bool single = in.arg[1].ref == '-';
+  float left = single ? p.flow : evalOperand(p, in.arg[0]);
+  float right = evalOperand(p, single ? in.arg[0] : in.arg[1]);
+  return compareValues(in.cmp, left, right);
 }
 
 void finishProgram(int index, ProgState state) {
@@ -333,7 +368,7 @@ void stepProgram(int index) {
 
       case OP_WHILE:
       case OP_IF:
-        p.pc = conditionHolds(p, in) ? p.pc + 1 : in.jump + 1;
+        p.pc = conditionHolds(p, p.pc) ? p.pc + 1 : in.jump + 1;
         break;
 
       case OP_ELSE:
@@ -436,8 +471,48 @@ int opFromCode(char code) {
     case 'C': return OP_IF;
     case 'E': return OP_END;
     case 'N': return OP_ELSE;
+    case 'Q': return OP_TEST;
+    case '&': return OP_AND;
+    case '|': return OP_OR;
+    case '^': return OP_XOR;
+    case '~': return OP_NOT;
   }
   return -1;
+}
+
+// As n instruções antes de um H/C com cmp '?' precisam formar uma expressão pós-fixa completa.
+bool compoundIsValid(const Program& p, int pc) {
+  const Operand& count = p.code[pc].arg[0];
+  int n = lroundf(count.value);
+  if (count.ref != 0 || n < 1 || n > pc) {
+    return false;
+  }
+  int depth = 0;
+  for (int k = pc - n; k < pc; k++) {
+    switch (p.code[k].op) {
+      case OP_TEST:
+        if (++depth > MAX_COND_STACK) {
+          return false;
+        }
+        break;
+      case OP_NOT:
+        if (depth < 1) {
+          return false;
+        }
+        break;
+      case OP_AND:
+      case OP_OR:
+      case OP_XOR:
+        if (depth < 2) {
+          return false;
+        }
+        depth--;
+        break;
+      default:
+        return false;
+    }
+  }
+  return depth == 1;
 }
 
 bool programIsValid(const Program& p) {
@@ -451,6 +526,9 @@ bool programIsValid(const Program& p) {
       continue;
     }
     if (in.jump <= (in.op == OP_END ? -1 : i) || in.jump >= p.count) {
+      return false;
+    }
+    if ((in.op == OP_WHILE || in.op == OP_IF) && in.cmp == '?' && !compoundIsValid(p, i)) {
       return false;
     }
     int end = in.jump;

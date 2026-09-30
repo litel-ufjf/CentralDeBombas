@@ -15,6 +15,10 @@ export type BlockKind =
   | "sine"
   | "step"
   | "compare"
+  | "and"
+  | "or"
+  | "xor"
+  | "not"
   | "varFlow"
   | "varTime"
   | "varVolume"
@@ -35,11 +39,25 @@ export const COMPARE_OPS: { op: CompareOp; label: string }[] = [
 ];
 
 export type Comparison = { left: FieldValue; op: CompareOp; right: FieldValue };
-/** Condição de Enquanto/Se: uma comparação ou uma variável usada como booleano (≠ 0). */
-export type Condition = Comparison | { ref: IoRef };
+export type BinaryLogic = "and" | "or" | "xor";
+export type LogicOp = BinaryLogic | "not";
+export type LogicCondition =
+  | { logic: BinaryLogic; a: Condition | null; b: Condition | null }
+  | { logic: "not"; a: Condition | null };
+/** Condição de Enquanto/Se: comparação, variável usada como booleano (≠ 0) ou operador lógico. */
+export type Condition = Comparison | { ref: IoRef } | LogicCondition;
+
+export const LOGIC_LABEL: Record<LogicOp, string> = {
+  and: "e",
+  or: "ou",
+  xor: "ou exclusivo",
+  not: "não",
+};
 
 export type SwitchCase = { id: string; match: FieldValue; children: ExperimentBlock[] };
 
+/** Caminho da condição raiz; os operandos de um operador lógico são `cond.a`, `cond.a.b`… */
+export const COND = "cond";
 export const COND_LEFT = "cond.left";
 export const COND_RIGHT = "cond.right";
 export const BODY = "body";
@@ -98,7 +116,13 @@ export const PALETTE: { title: string; category: BlockCategory; items: PaletteIt
   {
     title: "Condições",
     category: "compare",
-    items: [{ kind: "compare", category: "compare", label: "Comparação" }],
+    items: [
+      { kind: "compare", category: "compare", label: "Comparação" },
+      { kind: "and", category: "compare", label: "E" },
+      { kind: "or", category: "compare", label: "OU" },
+      { kind: "xor", category: "compare", label: "OU exclusivo" },
+      { kind: "not", category: "compare", label: "NÃO" },
+    ],
   },
   {
     title: "Variáveis/E/S",
@@ -144,6 +168,10 @@ const KIND_META: Record<
   sine: { category: "profile", fields: { center: 30, amplitude: 10, period: 20 } },
   step: { category: "profile", fields: { from: 0, to: 40, duration: 5 } },
   compare: { category: "compare", fields: {} },
+  and: { category: "compare", fields: {} },
+  or: { category: "compare", fields: {} },
+  xor: { category: "compare", fields: {} },
+  not: { category: "compare", fields: {} },
   varFlow: { category: "io", fields: {} },
   varTime: { category: "io", fields: {} },
   varVolume: { category: "io", fields: {} },
@@ -173,12 +201,87 @@ export function hasCondition(kind: BlockKind) {
   return kind === "while" || kind === "if";
 }
 
+export function isLogicKind(kind: BlockKind): kind is LogicOp {
+  return kind === "and" || kind === "or" || kind === "xor" || kind === "not";
+}
+
+/** Blocos hexagonais que ocupam o espaço de condição. */
+export function isConditionKind(kind: BlockKind) {
+  return kind === "compare" || isLogicKind(kind);
+}
+
 export function isStatement(kind: BlockKind) {
-  return !isReporter(kind) && kind !== "compare";
+  return !isReporter(kind) && !isConditionKind(kind);
 }
 
 export function isComparison(condition: Condition): condition is Comparison {
   return "op" in condition;
+}
+
+export function isLogic(condition: Condition): condition is LogicCondition {
+  return "logic" in condition;
+}
+
+export function newLogic(logic: LogicOp, a: Condition | null = null): LogicCondition {
+  return logic === "not" ? { logic, a } : { logic, a, b: null };
+}
+
+export function condChild(path: string, side: "a" | "b") {
+  return `${path}.${side}`;
+}
+
+/** Diz se `path` é o próprio `ancestor` ou está dentro dele. */
+export function isPathWithin(path: string, ancestor: string) {
+  return path === ancestor || path.startsWith(`${ancestor}.`);
+}
+
+function pathSegments(path: string): ("a" | "b")[] | null {
+  const [root, ...rest] = path.split(".");
+  if (root !== COND || !rest.every((seg) => seg === "a" || seg === "b")) {
+    return null;
+  }
+  return rest as ("a" | "b")[];
+}
+
+export function conditionAt(
+  condition: Condition | null | undefined,
+  path: string,
+): Condition | null {
+  const segments = pathSegments(path);
+  let current = condition ?? null;
+  for (const seg of segments ?? []) {
+    if (!current || !isLogic(current)) {
+      return null;
+    }
+    current = seg === "a" ? current.a : current.logic === "not" ? null : current.b;
+  }
+  return segments ? current : null;
+}
+
+function replaceAt(
+  condition: Condition | null,
+  segments: ("a" | "b")[],
+  next: Condition | null,
+): Condition | null | undefined {
+  if (segments.length === 0) {
+    return next;
+  }
+  if (!condition || !isLogic(condition)) {
+    return undefined;
+  }
+  const [seg, ...rest] = segments;
+  if (seg === "b" && condition.logic === "not") {
+    return undefined;
+  }
+  const child = seg === "a" ? condition.a : (condition as { b: Condition | null }).b;
+  const replaced = replaceAt(child, rest, next);
+  return replaced === undefined ? undefined : { ...condition, [seg]: replaced };
+}
+
+/** Chave de um campo numérico dentro de uma comparação: `<caminho>.left` ou `<caminho>.right`. */
+function valueSlotPath(key: string): { path: string; side: "left" | "right" } | null {
+  const match = /^(cond(?:\.[ab])*)\.(left|right)$/.exec(key);
+  return match ? { path: match[1], side: match[2] as "left" | "right" } : null;
 }
 
 export function emptyCondition(): Comparison {
@@ -225,12 +328,10 @@ export function createBlock(kind: BlockKind): ExperimentBlock {
 }
 
 export function slotValue(block: ExperimentBlock, key: string): FieldValue | undefined {
-  if (key === COND_LEFT || key === COND_RIGHT) {
-    const condition = block.condition;
-    if (!condition || !isComparison(condition)) {
-      return undefined;
-    }
-    return key === COND_LEFT ? condition.left : condition.right;
+  const slot = valueSlotPath(key);
+  if (slot) {
+    const condition = conditionAt(block.condition, slot.path);
+    return condition && isComparison(condition) ? condition[slot.side] : undefined;
   }
   if (key.startsWith("case:")) {
     return block.cases?.find((item) => caseKey(item.id) === key)?.match;
@@ -455,13 +556,13 @@ export function setField(
   value: FieldValue,
 ): ExperimentBlock[] {
   return updateBlock(blocks, id, (block) => {
-    if (key === COND_LEFT || key === COND_RIGHT) {
-      const condition = block.condition;
+    const slot = valueSlotPath(key);
+    if (slot) {
+      const condition = conditionAt(block.condition, slot.path);
       if (!condition || !isComparison(condition)) {
         return block;
       }
-      const side = key === COND_LEFT ? "left" : "right";
-      return { ...block, condition: { ...condition, [side]: value } };
+      return withCondition(block, slot.path, { ...condition, [slot.side]: value });
     }
     if (key.startsWith("case:")) {
       return {
@@ -480,26 +581,40 @@ export function clearSlot(blocks: ExperimentBlock[], id: string, key: string) {
   return block ? setField(blocks, id, key, defaultSlotValue(block, key)) : blocks;
 }
 
+function withCondition(
+  block: ExperimentBlock,
+  path: string,
+  next: Condition | null,
+): ExperimentBlock {
+  const segments = pathSegments(path);
+  if (!segments || !hasCondition(block.kind)) {
+    return block;
+  }
+  const replaced = replaceAt(block.condition ?? null, segments, next);
+  return replaced === undefined ? block : { ...block, condition: replaced };
+}
+
 export function setCondition(
   blocks: ExperimentBlock[],
   id: string,
   condition: Condition | null,
+  path = COND,
 ): ExperimentBlock[] {
-  return updateBlock(blocks, id, (block) =>
-    hasCondition(block.kind) ? { ...block, condition } : block,
-  );
+  return updateBlock(blocks, id, (block) => withCondition(block, path, condition));
 }
 
 export function setCompareOp(
   blocks: ExperimentBlock[],
   id: string,
   op: CompareOp,
+  path = COND,
 ): ExperimentBlock[] {
-  return updateBlock(blocks, id, (block) =>
-    block.condition && isComparison(block.condition)
-      ? { ...block, condition: { ...block.condition, op } }
-      : block,
-  );
+  return updateBlock(blocks, id, (block) => {
+    const condition = conditionAt(block.condition, path);
+    return condition && isComparison(condition)
+      ? withCondition(block, path, { ...condition, op })
+      : block;
+  });
 }
 
 export function toggleElse(blocks: ExperimentBlock[], id: string): ExperimentBlock[] {
@@ -551,20 +666,40 @@ function isCompareOp(value: unknown): value is CompareOp {
   return COMPARE_OPS.some((item) => item.op === value);
 }
 
+const LOGIC_OPS = Object.keys(LOGIC_LABEL) as LogicOp[];
+const MAX_CONDITION_DEPTH = 8;
+
+function sanitizeConditionNode(value: unknown, depth: number): Condition | null {
+  if (!value || typeof value !== "object" || depth > MAX_CONDITION_DEPTH) {
+    return null;
+  }
+  const cond = value as Record<string, unknown>;
+  if ("logic" in cond) {
+    const logic = LOGIC_OPS.find((item) => item === cond.logic);
+    if (!logic) {
+      return null;
+    }
+    const a = sanitizeConditionNode(cond.a, depth + 1);
+    return logic === "not"
+      ? { logic, a }
+      : { logic, a, b: sanitizeConditionNode(cond.b, depth + 1) };
+  }
+  if (!("op" in cond) && isIoRef(cond.ref)) {
+    return { ref: cond.ref };
+  }
+  return {
+    left: sanitizeValue(cond.left, 0),
+    op: isCompareOp(cond.op) ? cond.op : ">",
+    right: sanitizeValue(cond.right, 0),
+  };
+}
+
 function sanitizeCondition(raw: Partial<ExperimentBlock>, kind: BlockKind): Condition | null {
   if (raw.condition === null) {
     return null;
   }
-  const cond = raw.condition as Record<string, unknown> | undefined;
-  if (cond && typeof cond === "object") {
-    if (!("op" in cond) && isIoRef(cond.ref)) {
-      return { ref: cond.ref };
-    }
-    return {
-      left: sanitizeValue(cond.left, 0),
-      op: isCompareOp(cond.op) ? cond.op : ">",
-      right: sanitizeValue(cond.right, 0),
-    };
+  if (raw.condition && typeof raw.condition === "object") {
+    return sanitizeConditionNode(raw.condition, 0);
   }
   const fallback = defaultCondition(kind) ?? emptyCondition();
   const legacy = (raw.fields as Record<string, unknown> | undefined)?.threshold;

@@ -1,22 +1,31 @@
 import type { Calibration } from "./calibration";
 import {
   isComparison,
+  isLogic,
   isStatement,
   type CompareOp,
+  type Comparison,
   type Condition,
+  type IoRef,
   type ExperimentBlock,
   type FieldValue,
+  type LogicOp,
   type SwitchCase,
 } from "./experiment";
 
 export const MAX_INSTRUCTIONS = 128;
+/** Tamanho da pilha que a placa usa para avaliar condições compostas. */
+const MAX_CONDITION_STACK = 8;
 
 export type Instruction = {
   op: string;
   jump: number;
-  cmp: ">" | "G" | "<" | "L" | "=" | "!" | "-";
+  cmp: ">" | "G" | "<" | "L" | "=" | "!" | "?" | "-";
   args: [string, string, string];
 };
+
+const LOGIC_CODE: Record<LogicOp, string> = { and: "&", or: "|", xor: "^", not: "~" };
+const CONDITION_OPS = new Set(["Q", ...Object.values(LOGIC_CODE)]);
 
 export type CompiledProgram = {
   instructions: Instruction[];
@@ -72,7 +81,44 @@ function emit(
   return out.length - 1;
 }
 
-function conditionInstr(condition: Condition): { args: string[]; cmp: Instruction["cmp"] } {
+const MISSING_OPERAND =
+  "Há um operador lógico (e, ou, não) com um espaço de condição vazio. Encaixe nele uma Comparação, outro operador ou a variável Sentido.";
+
+/** Condição composta em notação pós-fixa: Q empilha uma comparação; &, |, ^ e ~ combinam o topo. */
+function emitConditionPostfix(condition: Condition | null, out: Instruction[], depth = 0): number {
+  if (!condition) {
+    throw new ProgramCompileError(MISSING_OPERAND);
+  }
+  if (isLogic(condition)) {
+    const left = emitConditionPostfix(condition.a, out, depth);
+    const right = condition.logic === "not" ? 0 : emitConditionPostfix(condition.b, out, depth + 1);
+    emit(out, LOGIC_CODE[condition.logic]);
+    return Math.max(left, right);
+  }
+  const leaf = isComparison(condition)
+    ? { args: [operand(condition.left), operand(condition.right)], cmp: CMP_CODE[condition.op] }
+    : { args: [operand(condition), "0"], cmp: "!" as const };
+  emit(out, "Q", leaf.args, leaf.cmp);
+  return depth + 1;
+}
+
+/** Emite a instrução H/C; condições compostas vêm antes dela, e a placa as reavalia a cada passagem. */
+function emitOpener(op: "H" | "C", condition: Condition, out: Instruction[]): number {
+  if (!isLogic(condition)) {
+    const test = conditionInstr(condition);
+    return emit(out, op, test.args, test.cmp);
+  }
+  const start = out.length;
+  const depth = emitConditionPostfix(condition, out);
+  if (depth > MAX_CONDITION_STACK) {
+    throw new ProgramCompileError(
+      `Uma condição tem operadores lógicos aninhados demais (o limite da placa é ${MAX_CONDITION_STACK} níveis). Simplifique-a.`,
+    );
+  }
+  return emit(out, op, [String(out.length - start)], "?");
+}
+
+function conditionInstr(condition: Comparison | { ref: IoRef }): { args: string[]; cmp: Instruction["cmp"] } {
   if (!isComparison(condition)) {
     return { args: [operand(condition), "0"], cmp: "!" };
   }
@@ -174,11 +220,10 @@ function compileList(blocks: ExperimentBlock[], out: Instruction[]): number | nu
         const condition = block.condition;
         if (!condition) {
           throw new ProgramCompileError(
-            `O bloco “${block.kind === "while" ? "Enquanto" : "Se"}” está sem condição. Encaixe nele uma Comparação ou a variável Sentido.`,
+            `O bloco “${block.kind === "while" ? "Enquanto" : "Se"}” está sem condição. Encaixe nele uma Comparação, um operador lógico ou a variável Sentido.`,
           );
         }
-        const test = conditionInstr(condition);
-        const open = emit(out, block.kind === "while" ? "H" : "C", test.args, test.cmp);
+        const open = emitOpener(block.kind === "while" ? "H" : "C", condition, out);
         const inner = compileList(block.children ?? [], out);
         if (block.kind === "if" && block.elseChildren) {
           const otherwise = emit(out, "N");
@@ -204,8 +249,14 @@ function compileList(blocks: ExperimentBlock[], out: Instruction[]): number | nu
 function firmwareLevel(instructions: Instruction[]) {
   let level = 1;
   for (const item of instructions) {
+    if (item.cmp === "?" || CONDITION_OPS.has(item.op)) {
+      return 4;
+    }
     if (item.op === "N" || item.cmp === "=" || item.cmp === "!" || item.args.includes("@D")) {
-      return 3;
+      level = 3;
+    }
+    if (level === 3) {
+      continue;
     }
     if ((item.op === "H" || item.op === "C") && item.args[1] !== NONE) {
       level = 2;

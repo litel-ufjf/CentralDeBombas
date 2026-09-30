@@ -27,14 +27,16 @@ import {
   BODY,
   CATEGORY_COLOR,
   COMPARE_OPS,
-  COND_LEFT,
-  COND_RIGHT,
+  COND,
   ELSE,
+  LOGIC_LABEL,
   PALETTE,
   REPORTER_HINT,
   addCase,
   caseKey,
   clearSlot,
+  condChild,
+  conditionAt,
   containsId,
   createBlock,
   emptyCondition,
@@ -42,7 +44,12 @@ import {
   insertBlock,
   isBooleanRef,
   isComparison,
+  isConditionKind,
   isContainer,
+  isLogic,
+  isLogicKind,
+  isPathWithin,
+  newLogic,
   isReporter,
   isStatement,
   kindCategory,
@@ -56,6 +63,7 @@ import {
   toggleElse,
   type BlockKind,
   type CompareOp,
+  type Condition,
   type ExperimentBlock,
   type FieldValue,
   type IoRef,
@@ -132,7 +140,7 @@ type DragPayload =
   | { from: "palette"; kind: BlockKind }
   | { from: "canvas"; id: string }
   | { from: "slot"; blockId: string; key: string; ref: IoRef }
-  | { from: "cond"; blockId: string };
+  | { from: "cond"; blockId: string; path: string };
 type DragKind = "statement" | "value" | "condition";
 
 function payloadKind(payload: DragPayload | null): DragKind | null {
@@ -149,7 +157,7 @@ function payloadKind(payload: DragPayload | null): DragKind | null {
     if (isReporter(payload.kind)) {
       return "value";
     }
-    return payload.kind === "compare" ? "condition" : "statement";
+    return isConditionKind(payload.kind) ? "condition" : "statement";
   }
   return "statement";
 }
@@ -175,8 +183,8 @@ type SlotApi = {
   startDrag: (event: DragEvent, payload: DragPayload) => void;
   endDrag: () => void;
   dropValue: (blockId: string, key: string) => void;
-  dropCondition: (blockId: string) => void;
-  setOp: (blockId: string, op: CompareOp) => void;
+  dropCondition: (blockId: string, path: string) => void;
+  setOp: (blockId: string, path: string, op: CompareOp) => void;
   toggleElse: (blockId: string) => void;
   addCase: (blockId: string) => void;
   removeCase: (blockId: string, caseId: string) => void;
@@ -611,31 +619,67 @@ function HexShape({
   );
 }
 
-function CompareBlock({
+function ConditionBlock({
   block,
+  path,
+  condition,
   glow,
   onField,
 }: {
   block: ExperimentBlock;
+  path: string;
+  condition: Condition;
   glow?: string;
   onField: (key: string, value: FieldValue) => void;
 }) {
   const api = useSlots();
-  const condition = block.condition;
-  if (!condition) {
-    return null;
+  const dragProps = (title: string) => ({
+    draggable: true,
+    onPointerDown: armDrag,
+    onDragStart: (event: DragEvent<HTMLSpanElement>) => {
+      event.stopPropagation();
+      api.startDrag(event, { from: "cond", blockId: block.id, path });
+    },
+    onDragEnd: api.endDrag,
+    title,
+    className: "inline-flex cursor-grab active:cursor-grabbing",
+  });
+
+  if (isLogic(condition)) {
+    const color = CATEGORY_COLOR.compare;
+    const label = (
+      <span className="text-[14.5px] leading-none whitespace-nowrap text-white">
+        {LOGIC_LABEL[condition.logic]}
+      </span>
+    );
+    return (
+      <span
+        {...dragProps(
+          `Operador lógico “${LOGIC_LABEL[condition.logic]}”. Arraste para outro espaço de condição, ou para a lixeira para remover.`,
+        )}
+      >
+        <HexShape color={color} glow={glow}>
+          <span className="relative flex items-center gap-[6px] py-[3px] pr-[15px] pl-[15px]">
+            {condition.logic === "not" ? label : null}
+            <ConditionSlot block={block} path={condChild(path, "a")} color={color} onField={onField} />
+            {condition.logic === "not" ? null : (
+              <>
+                {label}
+                <ConditionSlot block={block} path={condChild(path, "b")} color={color} onField={onField} />
+              </>
+            )}
+          </span>
+        </HexShape>
+      </span>
+    );
   }
+
   if (!isComparison(condition)) {
     return (
       <span
-        draggable
-        onDragStart={(event) => {
-          event.stopPropagation();
-          api.startDrag(event, { from: "cond", blockId: block.id });
-        }}
-        onDragEnd={api.endDrag}
-        title={`${REPORTER_HINT[condition.ref]}. Arraste para outro bloco, ou para a lixeira para remover.`}
-        className="inline-flex cursor-grab active:cursor-grabbing"
+        {...dragProps(
+          `${REPORTER_HINT[condition.ref]}. Arraste para outro espaço de condição, ou para a lixeira para remover.`,
+        )}
       >
         <HexShape color={CATEGORY_COLOR.io} glow={glow}>
           <span className="relative py-[5px] pr-[16px] pl-[16px] text-[14.5px] leading-none whitespace-nowrap text-white">
@@ -645,35 +689,32 @@ function CompareBlock({
       </span>
     );
   }
+
   const color = CATEGORY_COLOR.compare;
+  const left = `${path}.left`;
+  const right = `${path}.right`;
   return (
-    <span
-      draggable
-      onPointerDown={armDrag}
-      onDragStart={(event) => {
-        event.stopPropagation();
-        api.startDrag(event, { from: "cond", blockId: block.id });
-      }}
-      onDragEnd={api.endDrag}
-      title="Arraste a comparação para outro bloco, ou para a lixeira para remover"
-      className="inline-flex cursor-grab active:cursor-grabbing"
-    >
+    <span {...dragProps("Arraste a comparação para outro bloco, ou para a lixeira para remover")}>
       <HexShape color={color} glow={glow}>
         <span className="relative flex items-center gap-[6px] py-[3px] pr-[15px] pl-[16px]">
           <ValueInput
             color={color}
             blockId={block.id}
-            slot={COND_LEFT}
+            slot={left}
             value={condition.left}
-            onChange={(next) => onField(COND_LEFT, next)}
+            onChange={(next) => onField(left, next)}
           />
-          <OpSelect color={color} value={condition.op} onChange={(op) => api.setOp(block.id, op)} />
+          <OpSelect
+            color={color}
+            value={condition.op}
+            onChange={(op) => api.setOp(block.id, path, op)}
+          />
           <ValueInput
             color={color}
             blockId={block.id}
-            slot={COND_RIGHT}
+            slot={right}
             value={condition.right}
-            onChange={(next) => onField(COND_RIGHT, next)}
+            onChange={(next) => onField(right, next)}
           />
         </span>
       </HexShape>
@@ -683,23 +724,41 @@ function CompareBlock({
 
 function ConditionSlot({
   block,
+  path = COND,
   color,
   onField,
 }: {
   block: ExperimentBlock;
+  path?: string;
   color: string;
   onField: (key: string, value: FieldValue) => void;
 }) {
   const api = useSlots();
-  const drop = useSlotDrop(acceptsCondition, () => api.dropCondition(block.id));
+  const drop = useSlotDrop(acceptsCondition, () => api.dropCondition(block.id, path));
   const glow = drop.over ? SLOT_OVER : drop.accepting ? SLOT_ACCEPT : undefined;
+  const condition = conditionAt(block.condition, path);
+  const nested = path !== COND;
   return (
     <span {...drop.props} className="inline-flex items-center">
-      {block.condition ? (
-        <CompareBlock block={block} glow={glow} onField={onField} />
+      {condition ? (
+        <ConditionBlock
+          block={block}
+          path={path}
+          condition={condition}
+          glow={glow}
+          onField={onField}
+        />
       ) : (
-        <span title="Encaixe aqui uma Comparação ou a variável Sentido" className="inline-flex">
-          <HexShape color={shade(color, 0.3)} glow={glow} dashed minW={64} />
+        <span
+          title="Encaixe aqui uma Comparação, um operador lógico (e, ou, não) ou a variável Sentido"
+          className="inline-flex"
+        >
+          <HexShape
+            color={shade(color, nested ? 0.22 : 0.3)}
+            glow={glow}
+            dashed
+            minW={nested ? 44 : 64}
+          />
         </span>
       )}
     </span>
@@ -1263,12 +1322,15 @@ function PaletteBlock({
 }) {
   const color = CATEGORY_COLOR[item.category];
   const kind = item.kind;
-  if (isReporter(kind) || kind === "compare") {
+  if (isReporter(kind) || isConditionKind(kind)) {
     const hint = isReporter(kind)
       ? `${REPORTER_HINT[kind]}. Arraste para um campo numérico de um bloco${
           isBooleanRef(kind) ? " ou para o espaço de condição de Enquanto/Se" : ""
         }.`
-      : "Arraste para o espaço de condição de um bloco Enquanto ou Se, e depois encaixe variáveis nela.";
+      : isLogicKind(kind)
+        ? `Operador lógico “${LOGIC_LABEL[kind]}”. Arraste para o espaço de condição de Enquanto/Se ou de outro operador; se o espaço já tiver uma condição, ela vira o primeiro operando.`
+        : "Arraste para o espaço de condição de um bloco Enquanto ou Se, e depois encaixe variáveis nela.";
+    const emptySlot = <span className="h-[15px] w-[22px] rounded-[3px] bg-[#5a4690]" />;
     return (
       <div
         role="button"
@@ -1285,12 +1347,27 @@ function PaletteBlock({
         ) : (
           <HexShape color={color}>
             <span
-              className="relative flex items-center gap-[6px] py-[4px] pr-[12px] pl-[12px] text-[13.5px] leading-none text-white"
+              className="relative flex items-center gap-[6px] py-[4px] pr-[12px] pl-[12px] text-[13.5px] leading-none whitespace-nowrap text-white"
               style={{ fontFamily: BLOCK_FONT }}
             >
-              <span className="h-[17px] w-[26px] rounded-[4px] bg-[#eeedfa]" />
-              &gt;
-              <span className="h-[17px] w-[26px] rounded-[4px] bg-[#eeedfa]" />
+              {kind === "compare" ? (
+                <>
+                  <span className="h-[17px] w-[26px] rounded-[4px] bg-[#eeedfa]" />
+                  &gt;
+                  <span className="h-[17px] w-[26px] rounded-[4px] bg-[#eeedfa]" />
+                </>
+              ) : kind === "not" ? (
+                <>
+                  {LOGIC_LABEL.not}
+                  {emptySlot}
+                </>
+              ) : isLogicKind(kind) ? (
+                <>
+                  {emptySlot}
+                  {LOGIC_LABEL[kind]}
+                  {emptySlot}
+                </>
+              ) : null}
             </span>
           </HexShape>
         )}
@@ -1802,7 +1879,7 @@ export function ExperimentModal({
       } else if (drag.from === "slot") {
         setBlocks((current) => clearSlot(current, drag.blockId, drag.key));
       } else if (drag.from === "cond") {
-        setBlocks((current) => setCondition(current, drag.blockId, null));
+        setBlocks((current) => setCondition(current, drag.blockId, null, drag.path));
       }
       return;
     }
@@ -1834,23 +1911,39 @@ export function ExperimentModal({
     }
   };
 
-  const dropCondition = (blockId: string) => {
+  const dropCondition = (blockId: string, path: string) => {
     const drag = dragRef.current;
     resetDrag();
     const ref = booleanRefOf(drag);
+    const conditionOf = (current: ExperimentBlock[], id: string, at: string): Condition | null =>
+      conditionAt(findBlock(current, id)?.condition, at);
     if (drag?.from === "palette" && drag.kind === "compare") {
-      setBlocks((current) => setCondition(current, blockId, emptyCondition()));
+      setBlocks((current) => setCondition(current, blockId, emptyCondition(), path));
+    } else if (drag?.from === "palette" && isLogicKind(drag.kind)) {
+      const logic = drag.kind;
+      setBlocks((current) =>
+        setCondition(current, blockId, newLogic(logic, conditionOf(current, blockId, path)), path),
+      );
     } else if (ref && drag?.from === "palette") {
-      setBlocks((current) => setCondition(current, blockId, { ref }));
+      setBlocks((current) => setCondition(current, blockId, { ref }, path));
     } else if (ref && drag?.from === "slot") {
       setBlocks((current) =>
-        setCondition(clearSlot(current, drag.blockId, drag.key), blockId, { ref }),
+        setCondition(clearSlot(current, drag.blockId, drag.key), blockId, { ref }, path),
       );
-    } else if (drag?.from === "cond" && drag.blockId !== blockId) {
+    } else if (drag?.from === "cond") {
+      const sameBlock = drag.blockId === blockId;
+      if (sameBlock && (isPathWithin(path, drag.path) || isPathWithin(drag.path, path))) {
+        return;
+      }
       setBlocks((current) => {
-        const moving = findBlock(current, drag.blockId)?.condition ?? null;
-        const replaced = findBlock(current, blockId)?.condition ?? null;
-        return setCondition(setCondition(current, drag.blockId, replaced), blockId, moving);
+        const moving = conditionOf(current, drag.blockId, drag.path);
+        const replaced = conditionOf(current, blockId, path);
+        return setCondition(
+          setCondition(current, drag.blockId, replaced, drag.path),
+          blockId,
+          moving,
+          path,
+        );
       });
     }
   };
@@ -1878,7 +1971,8 @@ export function ExperimentModal({
     endDrag: resetDrag,
     dropValue,
     dropCondition,
-    setOp: (blockId, op) => setBlocks((current) => setCompareOp(current, blockId, op)),
+    setOp: (blockId, path, op) =>
+      setBlocks((current) => setCompareOp(current, blockId, op, path)),
     toggleElse: (blockId) => setBlocks((current) => toggleElse(current, blockId)),
     addCase: (blockId) => setBlocks((current) => addCase(current, blockId)),
     removeCase: (blockId, caseId) => setBlocks((current) => removeCase(current, blockId, caseId)),
