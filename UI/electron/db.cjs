@@ -281,6 +281,7 @@ function createStore(userDataDir, options = {}) {
       recipes,
       charts,
       experiments,
+      library: fromJson(metaGet("program_library"), []),
       preferences: fromJson(metaGet("preferences"), null),
       migratedFromLocal: metaGet("local_migrated") === "1",
     };
@@ -403,6 +404,12 @@ function createStore(userDataDir, options = {}) {
     return load();
   }
 
+  function saveLibrary(library) {
+    metaSet("program_library", asJson(Array.isArray(library) ? library : [], []));
+    persistSoon();
+    return load();
+  }
+
   function markMigrated() {
     metaSet("local_migrated", "1");
     persistSoon();
@@ -416,6 +423,9 @@ function createStore(userDataDir, options = {}) {
     const experiments = Array.isArray(snapshot?.experiments) ? snapshot.experiments : [];
     if (snapshot?.preferences) {
       metaSet("preferences", asJson(snapshot.preferences, {}));
+    }
+    if (Array.isArray(snapshot?.library)) {
+      metaSet("program_library", asJson(snapshot.library, []));
     }
     for (let index = 0; index < MOTOR_COUNT; index++) {
       const set = calibrations[index] || {};
@@ -470,6 +480,7 @@ function createStore(userDataDir, options = {}) {
     saveRecipes,
     saveCharts,
     saveExperiments,
+    saveLibrary,
     savePreferences,
     importLocal,
     markMigrated,

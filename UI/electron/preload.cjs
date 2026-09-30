@@ -24,8 +24,14 @@ contextBridge.exposeInMainWorld("bomba", {
     saveCharts: (layouts) => ipcRenderer.invoke("store:saveCharts", layouts),
     saveExperiments: (programs) =>
       ipcRenderer.invoke("store:saveExperiments", programs),
+    saveLibrary: (library) => ipcRenderer.invoke("store:saveLibrary", library),
     importLocal: (snapshot) => ipcRenderer.invoke("store:importLocal", snapshot),
     savePreferences: (preferences) =>
       ipcRenderer.invoke("store:savePreferences", preferences),
+  },
+  files: {
+    saveProgram: (suggestedName, content) =>
+      ipcRenderer.invoke("file:saveProgram", suggestedName, content),
+    openProgram: () => ipcRenderer.invoke("file:openProgram"),
   },
 });

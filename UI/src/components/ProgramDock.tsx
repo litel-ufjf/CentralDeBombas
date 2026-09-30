@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useBench } from "../context/BenchContext";
 import { isOwnedState } from "../lib/protocol";
-import { loadProgram } from "../lib/storage";
+import { loadPumpProgram } from "../lib/storage";
 import { ProgramControls } from "./ProgramControls";
 
 export function ProgramDock({
@@ -87,15 +87,19 @@ export function ProgramDock({
             }
             const owned = isOwnedState(programs[id - 1].state);
             const isEditor = editorId === id;
+            const program = loadPumpProgram(id);
             return (
               <li key={id} className="px-3.5 py-3">
                 <div className="mb-2 flex items-center gap-2">
-                  <span className="font-mono text-[12px] font-semibold tracking-widest text-foreground">
+                  <span className="shrink-0 font-mono text-[12px] font-semibold tracking-widest text-foreground">
                     {pump.name}
                   </span>
-                  {isEditor ? (
-                    <span className="text-[11px] text-faint">editor minimizado</span>
-                  ) : null}
+                  <span
+                    className="min-w-0 truncate text-[11px] text-faint"
+                    title={program.name}
+                  >
+                    {isEditor ? `${program.name} · editor minimizado` : program.name}
+                  </span>
                   <button
                     type="button"
                     onClick={() => onOpen(id)}
@@ -123,7 +127,7 @@ export function ProgramDock({
                 <ProgramControls
                   pumpId={id}
                   pumpName={pump.name}
-                  blocks={loadProgram(id)}
+                  blocks={program.blocks}
                   layout="mini"
                 />
               </li>

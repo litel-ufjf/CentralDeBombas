@@ -23,6 +23,7 @@ type StoreSnapshotInfo = {
   recipes: unknown;
   charts: unknown;
   experiments: unknown;
+  library?: unknown;
   preferences?: unknown;
   migratedFromLocal: boolean;
 };
@@ -34,6 +35,7 @@ type DesktopStoreApi = {
   saveRecipes: (recipes: unknown) => Promise<StoreSnapshotInfo>;
   saveCharts: (layouts: unknown) => Promise<StoreSnapshotInfo>;
   saveExperiments: (programs: unknown) => Promise<StoreSnapshotInfo>;
+  saveLibrary: (library: unknown) => Promise<StoreSnapshotInfo>;
   importLocal: (snapshot: unknown) => Promise<StoreSnapshotInfo>;
   savePreferences: (preferences: unknown) => Promise<StoreSnapshotInfo>;
 };
@@ -46,6 +48,12 @@ type DesktopSerialApi = {
   onData: (handler: (line: string) => void) => () => void;
   onClosed: (handler: (reason: string) => void) => () => void;
   store?: DesktopStoreApi;
+  files?: DesktopFilesApi;
+};
+
+type DesktopFilesApi = {
+  saveProgram: (suggestedName: string, content: string) => Promise<string | null>;
+  openProgram: () => Promise<{ name: string; content: string } | null>;
 };
 
 interface Window {

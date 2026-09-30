@@ -13,7 +13,7 @@ import {
 } from "../lib/calibration";
 import { initialVolumeFor, sourceLabel } from "../lib/preferences";
 import { isOwnedState } from "../lib/protocol";
-import { loadProgram } from "../lib/storage";
+import { loadPumpProgram } from "../lib/storage";
 
 export function PumpPage() {
   const { id } = useParams({ from: "/bomba/$id" });
@@ -43,7 +43,7 @@ export function PumpPage() {
   const maxFlow = pump ? maxFlowFromCalibration(pump.calibration) : 0;
   const editorShown = openId === Number(id) && !minimized;
   const savedProgram = useMemo(
-    () => (editorShown ? [] : loadProgram(Number(id))),
+    () => (editorShown ? null : loadPumpProgram(Number(id))),
     [editorShown, id],
   );
   const programmed = pump ? isOwnedState(programs[pump.id - 1].state) : false;
@@ -229,13 +229,20 @@ export function PumpPage() {
 
         {preferences.display.experiment || programmed ? (
           <div className="mt-3 rounded-[14px] bg-foreground/4 p-3 ring-1 ring-border">
-            <p className="mb-2 text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
-              Programação
-            </p>
+            <div className="mb-2 flex items-baseline gap-2">
+              <p className="shrink-0 text-[11px] tracking-[0.15em] text-muted-foreground uppercase">
+                Programação
+              </p>
+              {savedProgram ? (
+                <span className="truncate text-[12px] text-foreground" title={savedProgram.name}>
+                  {savedProgram.name}
+                </span>
+              ) : null}
+            </div>
             <ProgramControls
               pumpId={pump.id}
               pumpName={pump.name}
-              blocks={savedProgram}
+              blocks={savedProgram?.blocks ?? []}
               layout="card"
             />
             {programmed ? (

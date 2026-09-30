@@ -6,6 +6,7 @@ export type ConfirmRequest = {
   message: string;
   confirmLabel: string;
   danger?: boolean;
+  hideDontAsk?: boolean;
   onConfirm: (dontAskAgain: boolean) => void;
 };
 
@@ -62,15 +63,17 @@ export function ConfirmDialog({
         <p id={textId} className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
           {request.message}
         </p>
-        <label className="mt-4 flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground select-none">
-          <input
-            type="checkbox"
-            checked={dontAsk}
-            onChange={(event) => setDontAsk(event.target.checked)}
-            className="size-3.5 accent-[var(--run)]"
-          />
-          Não exibir esta mensagem novamente
-        </label>
+        {request.hideDontAsk ? null : (
+          <label className="mt-4 flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground select-none">
+            <input
+              type="checkbox"
+              checked={dontAsk}
+              onChange={(event) => setDontAsk(event.target.checked)}
+              className="size-3.5 accent-[var(--run)]"
+            />
+            Não exibir esta mensagem novamente
+          </label>
+        )}
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"

@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, Menu } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require("electron");
+const fs = require("node:fs");
 const path = require("node:path");
 const { execFile, spawn } = require("node:child_process");
 const { createStore } = require("./db.cjs");
@@ -277,6 +278,44 @@ ipcMain.handle("store:saveCharts", async (_event, layouts) =>
 ipcMain.handle("store:saveExperiments", async (_event, programs) =>
   requireStore().saveExperiments(programs),
 );
+ipcMain.handle("store:saveLibrary", async (_event, library) =>
+  requireStore().saveLibrary(library),
+);
+
+const PROGRAM_FILTERS = [
+  { name: "Programação de experimento", extensions: ["json"] },
+  { name: "Todos os arquivos", extensions: ["*"] },
+];
+
+ipcMain.handle("file:saveProgram", async (event, suggestedName, content) => {
+  const safe = String(suggestedName || "programacao").replace(/[\\/:*?"<>|]+/g, "-").trim();
+  const result = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: "Exportar programação",
+    defaultPath: path.join(app.getPath("documents"), `${safe || "programacao"}.json`),
+    filters: PROGRAM_FILTERS,
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  await fs.promises.writeFile(result.filePath, String(content), "utf8");
+  return result.filePath;
+});
+
+ipcMain.handle("file:openProgram", async (event) => {
+  const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: "Abrir programação",
+    defaultPath: app.getPath("documents"),
+    filters: PROGRAM_FILTERS,
+    properties: ["openFile"],
+  });
+  const filePath = result.filePaths?.[0];
+  if (result.canceled || !filePath) {
+    return null;
+  }
+  const content = await fs.promises.readFile(filePath, "utf8");
+  return { name: path.basename(filePath, path.extname(filePath)), content };
+});
+
 ipcMain.handle("store:importLocal", async (_event, snapshot) =>
   requireStore().importLocal(snapshot),
 );

@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -37,9 +38,57 @@ import {
   type IoRef,
   type PaletteItem,
 } from "../lib/experiment";
-import { loadProgram, saveProgram } from "../lib/storage";
+import { newId } from "../lib/calibration";
+import { exportProgramFile, openProgramFile, ProgramFileError } from "../lib/programFile";
+import {
+  defaultProgramName,
+  loadLibrary,
+  loadPumpProgram,
+  saveLibrary,
+  savePumpProgram,
+  type LibraryProgram,
+} from "../lib/storage";
+import { ConfirmDialog, type ConfirmRequest } from "./ConfirmDialog";
 import { LitelMark } from "./LitelMark";
 import { ProgramControls } from "./ProgramControls";
+import { ProgramLibraryDialog } from "./ProgramLibraryDialog";
+
+const EXPANDED_KEY = "bomba.editor-expanded";
+
+function readExpanded() {
+  try {
+    return localStorage.getItem(EXPANDED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function HeaderButton({
+  onClick,
+  title,
+  primary,
+  children,
+}: {
+  onClick: () => void;
+  title?: string;
+  primary?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={
+        primary
+          ? "rounded-[5px] bg-[#166993] px-4 py-2 text-[13px] font-medium whitespace-nowrap text-white shadow-sm hover:bg-[#12597d]"
+          : "rounded-[5px] bg-white px-3 py-2 text-[13px] font-medium whitespace-nowrap text-[#166993] ring-1 ring-[#c9dbe8] hover:bg-[#e8f1f7]"
+      }
+    >
+      {children}
+    </button>
+  );
+}
 
 const BLOCK_FONT = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
 const IO_MIME = "application/x-bomba-io";
@@ -798,29 +847,226 @@ export function ExperimentModal({
   onMinimize?: () => void;
   onClose: () => void;
 }) {
-  const [blocks, setBlocks] = useState<ExperimentBlock[]>(() => loadProgram(pumpId));
+  const [initial] = useState(() => loadPumpProgram(pumpId));
+  const [blocks, setBlocks] = useState<ExperimentBlock[]>(initial.blocks);
+  const [name, setName] = useState(initial.name);
+  const [docId, setDocId] = useState(initial.docId);
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(readExpanded);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [library, setLibrary] = useState<LibraryProgram[]>(loadLibrary);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [hover, setHover] = useState<DropTarget | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overTrash, setOverTrash] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const [saved, setSaved] = useState(false);
   const dragRef = useRef<DragPayload | null>(null);
   const blocksRef = useRef(blocks);
+  const programRef = useRef({ name, docId, blocks });
+  const savedRef = useRef(initial);
+  const pendingRef = useRef(false);
+  const flashTimer = useRef<number | undefined>(undefined);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const nameRef = useRef<HTMLInputElement | null>(null);
   blocksRef.current = blocks;
+  programRef.current = { name, docId, blocks };
+
+  const persistNow = () => {
+    pendingRef.current = false;
+    savedRef.current = programRef.current;
+    savePumpProgram(pumpId, programRef.current);
+    setSaving(false);
+  };
+
+  useEffect(() => {
+    const last = savedRef.current;
+    if (blocks === last.blocks && name === last.name && docId === last.docId) {
+      return;
+    }
+    pendingRef.current = true;
+    setSaving(true);
+    const timer = window.setTimeout(persistNow, 500);
+    return () => window.clearTimeout(timer);
+  }, [blocks, docId, name, pumpId]);
+
+  useEffect(
+    () => () => {
+      if (pendingRef.current) {
+        savePumpProgram(pumpId, programRef.current);
+      }
+      window.clearTimeout(flashTimer.current);
+    },
+    [pumpId],
+  );
 
   useEffect(() => {
     if (minimized) {
       return;
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !libraryOpen && !confirm) {
         onClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [minimized, onClose]);
+  }, [confirm, libraryOpen, minimized, onClose]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
+    } catch {
+      /* modo privado */
+    }
+  }, [expanded]);
+
+  const showFlash = (message: string) => {
+    setFlash(message);
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 2200);
+  };
+
+  const commitName = () => {
+    if (nameDraft === null) {
+      return;
+    }
+    const next = nameDraft.trim().slice(0, 80);
+    setNameDraft(null);
+    if (next && next !== name) {
+      setName(next);
+    }
+  };
+
+  const refreshLibrary = () => setLibrary(loadLibrary());
+  const cancelConfirm = useCallback(() => setConfirm(null), []);
+
+  const isDraftAtRisk = () => !docId && blocksRef.current.length > 0;
+
+  const replaceProgram = (next: { name: string; docId: string | null; blocks: ExperimentBlock[] }) => {
+    const apply = () => {
+      setConfirm(null);
+      setFlash(null);
+      setNameDraft(null);
+      setName(next.name);
+      setDocId(next.docId);
+      setBlocks(next.blocks);
+      programRef.current = next;
+      persistNow();
+      setLibraryOpen(false);
+      setZoom(1);
+      canvasRef.current?.scrollTo({ left: 0, top: 0 });
+    };
+    if (!isDraftAtRisk()) {
+      apply();
+      return;
+    }
+    setConfirm({
+      title: "Substituir a programação atual?",
+      message: `“${name}” não está salva na biblioteca e será descartada. Use “Salvar” antes se quiser mantê-la.`,
+      confirmLabel: "Substituir",
+      danger: true,
+      hideDontAsk: true,
+      onConfirm: apply,
+    });
+  };
+
+  const addToLibrary = (docName: string) => {
+    const doc: LibraryProgram = {
+      id: newId(),
+      name: docName,
+      blocks: blocksRef.current,
+      updatedAt: Date.now(),
+    };
+    saveLibrary([doc, ...loadLibrary()]);
+    setName(docName);
+    setDocId(doc.id);
+    programRef.current = { name: docName, docId: doc.id, blocks: blocksRef.current };
+    persistNow();
+    refreshLibrary();
+    return doc;
+  };
+
+  const handleSave = () => {
+    commitName();
+    const currentName = nameDraft?.trim() || name;
+    if (docId && loadLibrary().some((item) => item.id === docId)) {
+      programRef.current = { ...programRef.current, name: currentName };
+      persistNow();
+      refreshLibrary();
+      showFlash("Salvo na biblioteca");
+      return;
+    }
+    addToLibrary(currentName);
+    showFlash("Adicionado à biblioteca");
+  };
+
+  const handleSaveCopy = () => {
+    const taken = new Set(loadLibrary().map((item) => item.name));
+    let copyName = `${name} (cópia)`;
+    for (let n = 2; taken.has(copyName); n++) {
+      copyName = `${name} (cópia ${n})`;
+    }
+    addToLibrary(copyName.slice(0, 80));
+    setLibraryOpen(false);
+    showFlash("Cópia salva na biblioteca");
+  };
+
+  const handleExport = async () => {
+    try {
+      const saved = await exportProgramFile(name, blocksRef.current);
+      if (saved) {
+        showFlash("Arquivo exportado");
+      }
+    } catch {
+      showFlash("Falha ao exportar o arquivo");
+    }
+  };
+
+  const handleOpenFile = async () => {
+    try {
+      const file = await openProgramFile();
+      if (file) {
+        replaceProgram({ name: file.name, docId: null, blocks: file.blocks });
+      }
+    } catch (error) {
+      showFlash(error instanceof ProgramFileError ? error.message : "Falha ao abrir o arquivo");
+    }
+  };
+
+  const handleRename = (id: string, docName: string) => {
+    saveLibrary(
+      loadLibrary().map((item) =>
+        item.id === id ? { ...item, name: docName, updatedAt: Date.now() } : item,
+      ),
+    );
+    if (id === docId) {
+      setName(docName);
+    }
+    refreshLibrary();
+  };
+
+  const handleDelete = (item: LibraryProgram) => {
+    setConfirm({
+      title: "Excluir programação?",
+      message:
+        item.id === docId
+          ? `“${item.name}” será removida da biblioteca. A programação continua aberta no editor como rascunho.`
+          : `“${item.name}” será removida da biblioteca. Esta ação não pode ser desfeita.`,
+      confirmLabel: "Excluir",
+      danger: true,
+      hideDontAsk: true,
+      onConfirm: () => {
+        setConfirm(null);
+        saveLibrary(loadLibrary().filter((entry) => entry.id !== item.id));
+        if (item.id === docId) {
+          setDocId(null);
+        }
+        refreshLibrary();
+      },
+    });
+  };
 
   const resetDrag = () => {
     dragRef.current = null;
@@ -878,12 +1124,6 @@ export function ExperimentModal({
     }
   };
 
-  const handleSave = () => {
-    saveProgram(pumpId, blocks);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1600);
-  };
-
   const handlers: NodeHandlers = {
     hover,
     draggingId,
@@ -903,7 +1143,9 @@ export function ExperimentModal({
   return (
     <div
       className={
-        minimized ? "hidden" : "fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
+        minimized
+          ? "hidden"
+          : `fixed inset-0 z-50 flex items-center justify-center ${expanded ? "" : "p-4 sm:p-8"}`
       }
     >
       <button
@@ -916,10 +1158,39 @@ export function ExperimentModal({
         role="dialog"
         aria-labelledby="experiment-title"
         aria-describedby="experiment-unit"
-        className="relative flex h-[min(780px,90vh)] w-[min(1010px,96vw)] flex-col overflow-hidden rounded-[10px] bg-[#f6f9fc] shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/5"
+        className={`relative flex flex-col overflow-hidden bg-[#f6f9fc] ${
+          expanded
+            ? "h-[100dvh] w-screen"
+            : "h-[min(780px,90vh)] w-[min(1010px,96vw)] rounded-[10px] shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/5"
+        }`}
         style={{ fontFamily: BLOCK_FONT }}
       >
         <div className="absolute top-1.5 right-2 z-10 flex items-center gap-0.5">
+          <button
+            type="button"
+            aria-label={expanded ? "Restaurar tamanho" : "Expandir"}
+            title={expanded ? "Restaurar tamanho" : "Expandir para a tela inteira"}
+            aria-pressed={expanded}
+            onClick={() => setExpanded((value) => !value)}
+            className="grid size-6 place-items-center rounded-full text-slate-600 hover:bg-slate-200/70"
+          >
+            <svg
+              aria-hidden
+              viewBox="0 0 12 12"
+              className="size-3"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {expanded ? (
+                <path d="M4.5 1.5v3h-3M7.5 1.5v3h3M4.5 10.5v-3h-3M7.5 10.5v-3h3" />
+              ) : (
+                <path d="M1.5 4.5v-3h3M10.5 4.5v-3h-3M1.5 7.5v3h3M10.5 7.5v3h-3" />
+              )}
+            </svg>
+          </button>
           {onMinimize ? (
             <button
               type="button"
@@ -943,30 +1214,103 @@ export function ExperimentModal({
           </button>
         </div>
 
-        <header className="flex items-center gap-4 pt-[34px] pr-6 pb-[14px] pl-6">
-          <h2
-            id="experiment-title"
-            className="shrink-0 text-[21px] font-semibold whitespace-nowrap text-[#141b21]"
-          >
-            Programação de Experimento
-          </h2>
-          <span id="experiment-unit" className="truncate text-[12px] text-slate-400">
-            {pumpName}
-          </span>
-          <div className="ml-auto flex items-center gap-3.5">
-            <LitelMark className="max-[720px]:hidden" />
+        <header className="flex items-center gap-4 pt-[30px] pr-6 pb-[12px] pl-6">
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-3">
+              <h2
+                id="experiment-title"
+                className="shrink-0 text-[21px] font-semibold whitespace-nowrap text-[#141b21]"
+              >
+                Programação de Experimento
+              </h2>
+              <span id="experiment-unit" className="truncate text-[12px] text-slate-400">
+                {pumpName}
+              </span>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12.5px]">
+              <input
+                ref={nameRef}
+                value={nameDraft ?? name}
+                maxLength={80}
+                aria-label="Nome da programação"
+                title="Clique para renomear"
+                onFocus={() => setNameDraft(name)}
+                onChange={(event) => setNameDraft(event.target.value)}
+                onBlur={commitName}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  } else if (event.key === "Escape") {
+                    event.stopPropagation();
+                    setNameDraft(null);
+                    requestAnimationFrame(() => nameRef.current?.blur());
+                  }
+                }}
+                className="field-sizing-content max-w-[40ch] min-w-[6ch] rounded-[4px] bg-transparent px-1 py-0.5 -ml-1 font-medium text-[#1f2933] outline-none hover:bg-slate-200/60 focus:bg-white focus:ring-1 focus:ring-[#166993]"
+              />
+              <button
+                type="button"
+                aria-label="Renomear programação"
+                title="Renomear"
+                onClick={() => nameRef.current?.select()}
+                className="grid size-5 shrink-0 place-items-center rounded text-slate-400 hover:text-slate-600"
+              >
+                <svg
+                  aria-hidden
+                  viewBox="0 0 16 16"
+                  className="size-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                >
+                  <path d="M10.5 2.5l3 3L6 13H3v-3z" />
+                </svg>
+              </button>
+              <span
+                aria-live="polite"
+                className={`truncate text-[11.5px] ${flash ? "text-[#166993]" : "text-slate-400"}`}
+              >
+                {flash
+                  ? `${flash} ✓`
+                  : saving
+                    ? "Salvando…"
+                    : docId
+                      ? "Na biblioteca · salvo automaticamente"
+                      : "Rascunho · salvo automaticamente"}
+              </span>
+            </div>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <LitelMark className="mr-1.5 max-[980px]:hidden" />
             <img
               src={copasa}
               alt="Copasa"
-              className="h-8 w-auto object-contain max-[720px]:hidden"
+              className="mr-2 h-8 w-auto object-contain max-[980px]:hidden"
             />
-            <button
-              type="button"
-              onClick={handleSave}
-              className="rounded-[5px] bg-[#166993] px-4 py-2 text-[13px] font-medium text-white shadow-sm hover:bg-[#12597d]"
+            <HeaderButton
+              title="Abrir uma programação da biblioteca ou de um arquivo"
+              onClick={() => {
+                refreshLibrary();
+                setLibraryOpen(true);
+              }}
             >
-              {saved ? "Salvo ✓" : "Salvar"}
-            </button>
+              Abrir
+            </HeaderButton>
+            <HeaderButton title="Exportar para um arquivo .json" onClick={() => void handleExport()}>
+              Exportar
+            </HeaderButton>
+            <HeaderButton
+              primary
+              title={
+                docId
+                  ? "A programação já está na biblioteca e é salva automaticamente"
+                  : "Guardar esta programação na biblioteca da aplicação"
+              }
+              onClick={handleSave}
+            >
+              Salvar
+            </HeaderButton>
           </div>
         </header>
 
@@ -1093,10 +1437,28 @@ export function ExperimentModal({
             pumpId={pumpId}
             pumpName={pumpName}
             blocks={blocks}
-            onBeforeRun={() => saveProgram(pumpId, blocksRef.current)}
+            onBeforeRun={persistNow}
             layout="bar"
           />
         </footer>
+
+        {libraryOpen ? (
+          <ProgramLibraryDialog
+            library={library}
+            currentDocId={docId}
+            blocked={Boolean(confirm)}
+            onClose={() => setLibraryOpen(false)}
+            onOpen={(item) => replaceProgram({ name: item.name, docId: item.id, blocks: item.blocks })}
+            onRename={handleRename}
+            onDelete={handleDelete}
+            onNew={() =>
+              replaceProgram({ name: defaultProgramName(pumpId), docId: null, blocks: [] })
+            }
+            onOpenFile={() => void handleOpenFile()}
+            onSaveCopy={handleSaveCopy}
+          />
+        ) : null}
+        <ConfirmDialog request={confirm} onCancel={cancelConfirm} />
       </div>
     </div>
   );
