@@ -690,11 +690,11 @@ function PaletteBlock({
       className="py-[4px] pr-[12px] pl-[9px] text-[13.5px] leading-none whitespace-nowrap text-white"
       style={{ fontFamily: BLOCK_FONT }}
     >
-      {item.kind === "ramp" ? (
+      {item.kind === "ramp" || item.kind === "sine" || item.kind === "step" ? (
         <div className="flex flex-col gap-[3px] py-[2px]">
           <span>{label}</span>
           <span className="flex justify-end pl-[84px]">
-            <MiniChart kind="ramp" fields={createBlock("ramp").fields} width={116} height={82} />
+            <MiniChart kind={item.kind} fields={createBlock(item.kind).fields} width={116} height={82} />
           </span>
         </div>
       ) : (
