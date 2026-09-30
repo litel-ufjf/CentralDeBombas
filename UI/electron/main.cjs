@@ -225,6 +225,13 @@ function createWindow() {
     });
   }
 
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type === "keyDown" && input.key === "F11" && !input.isAutoRepeat) {
+      event.preventDefault();
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    }
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });

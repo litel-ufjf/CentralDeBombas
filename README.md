@@ -15,7 +15,7 @@ Há um [guia do usuário em PDF](documentos/guia_usuario.pdf) na pasta `document
 3. Grave no ESP32 o sketch **Arduino/interface_prog** (TB6612FNG, com programação de experimentos; recomendado a partir da versão 2), **Arduino/interface_TB** (TB6612FNG, só controle manual) ou **Arduino/interface** (L298N), só na primeira vez ou quando o firmware mudar.
 4. Ligue a placa no PC pelo USB, escolha a porta COM e clique em **Conectar**.
 
-Pronto: ligue, ajuste PWM, sentido e velocidade pelo painel.
+Pronto: ligue, ajuste PWM, sentido e velocidade pelo painel. **F11** alterna a tela cheia em qualquer tela do app.
 
 Enquanto o cabo estiver desconectado, os valores na tela ficam em zero. Cada bomba tem uma página própria (**Abrir**), com calibração da vazão estimada: zero abaixo do limiar PWM₀ e `Q = a × (PWM − PWM₀)` acima dele, já que ainda não há sensor de fluxo.
 
